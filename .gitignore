@@ -1,4 +1,27 @@
 .env
 raw/
-CLAUDE.md
 .claude/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Build
+build/
+dist/
+*.egg-info/
+
+# Test & lint caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Pipeline outputs (gitignored)
+output/
+.embed_cache.sqlite
+qdrant_storage/
+
+# Domain reviewer scratch
+tmp/

@@ -34,8 +34,9 @@
 |---|---|---|
 | 1 | Agent Teams 전략 | **전면 사용** (Phase 0~4 전부). 각 팀원이 초기 의도·컨텍스트 유지. 토큰 상한 도달 시 해당 Phase 에서 중단 |
 | 2 | JSON 중간 단계 용도 | **a+b+c 모두** — ① 사람 검수 ② 타 시스템 연계 (스키마 문서화 필수) ③ 재임베딩 캐시 (embedding 필드 nullable) |
-| 3 | Qdrant 구조 | **파일별 별도 collection** |
+| 3 | Qdrant 구조 | **파일별 별도 collection**. 사유: 문서 간 권위 구조·어휘·문단번호 체계가 달라 임베딩 공간을 격리해야 검색 품질 보장. 교차 문서 검색은 현재 요구사항 아님 (CHECKPOINT 0 재확인, 2026-04-20) |
 | 4 | 이번 세션 범위 | Phase 0 + Phase 1 착수. 토큰 제한 도달 시 중단 |
+| 5 | 벡터 DB: pgvector → Qdrant | **Qdrant 채택**. 사유: ① Solar 4096d HNSW 지원 (pgvector 0.6 은 IVFFlat 우회 필요, 0.7+ 는 HNSW 확장됐으나 운영 리스크), ② named vectors 로 `passage`·`summary` 분리 내장 지원, ③ payload filter 로 standard_no·section·authority 조합 인덱싱 우수, ④ IFRS 프로젝트와 DB 인프라 분리 (장애 격리). 결정일: 2026-04-20 CHECKPOINT 0 |
 
 ### JSON 스키마 요구사항 (결정 2 반영)
 
@@ -107,11 +108,26 @@
   - 필드: `idx, kind, text, style, paragraph_id, is_application_guidance, parent_paragraph_id, standard_no, standard_title, section, heading_trail, immediate_heading, is_toc, is_header_footer, table_cells`
 - `docx_reader.py` — DOCX body iterate (python-docx + lxml), style→kind 매핑, 표 처리, 빈 문단 skip
 - `numbering.py` — `word/numbering.xml` 파싱 + 카운터 replay
-  - 예상 패턴: numId=64 ilvl=0 `%1.` → 요구사항 ID, numId=57 ilvl=0 `A%1.` → 적용지침 ID
+  - **실측 복잡도 (CHECKPOINT 0, `docs/isa_structure_profile.md`)**: 742개 numId 인스턴스, abstractNumId 5개 계열 `{15, 51, 70, 98, 140}`, 9종 이상 lvlText 패턴
+  - **요구사항 ID**: `abstractNumId ∈ {70, 98, 140}`, ilvl=0 → `%1.` decimal (세 계열 동일 구조)
+  - **적용지침 ID**: `abstractNumId ∈ {15, 51}`, ilvl=0 → `A%1.` decimal
+  - **`numId='0'` 특수 케이스** (303개 문단): 명시적 번호 제거 마커. `None` 과 반드시 구별 — 상태머신에서 "번호 없음 (의도적)" 으로 표시
+  - **동적 fallback 필수**: 미지 `abstractNumId`/`lvlText` 조합을 만나면 (a) 경고 로그 (b) `kind='unknown_numbering'` 태깅 (c) 파싱 계속 — hard-coded 화이트리스트 금지
+  - Phase 1 착수 전 `docs/numbering_strategy.md` 로 동적 handling 설계 문서 산출
 - `structure.py` — 상태머신 `PRE_TOC → TOC → STANDARD_BODY`
   - `감사기준서 N` 경계 탐지, section 매핑 (`서론/목적/용어의 정의/요구사항/적용 및 기타 설명자료`)
+  - **ISA-200 특수처리**: `감사인의 전반적인 목적` 섹션 (유일) — section enum 에 `overall_objective` 추가
+  - **ISA-1200 특수처리**: 요구사항·적용지침 섹션 없음, `목적` 3회 반복 — section 카운팅 로직 필요
   - heading stack → `heading_trail`, `An` → 부모 `n` 연결
-  - 반복 페이지 헤더 필터
+  - 반복 페이지 헤더 필터 — **실측상 body iteration 자동 제외됨** (헤더는 `word/header*.xml` 에만 존재). `_flag_repeating_headers` 는 보험용으로만 유지
+  - **`목차` 스타일 764개가 전역 산재** (단순 PRE_TOC→TOC 상태머신만으론 불충분) — `ad` 스타일 블록을 상태 무관하게 is_toc 플래깅하는 2차 규칙 추가
+
+#### 표(Table) 처리 — 1×1 박스 승격 (CHECKPOINT 0 결정)
+
+실측 74개 표 중 **58개(78%) 가 1×1 단일 셀** — 예시·경고·인용 컨테이너용. Phase 1 IR 레이어에서:
+- 1×1 단일 셀 표 → `paragraph_body` 로 승격 (heading_trail 보존)
+- 2×N 이상 → `kind='table'` 유지, `table_cells` 보존
+- ISA-1200 의 66×2 초대형 표 → Phase 2 청킹 시 행별 분할 예외처리
 
 #### Renderer (`src/audit_parser/convert/md_renderer.py`)
 
@@ -272,7 +288,8 @@ audit-parser ingest --single output/json/ISA-200.json --collection audit_standar
 
 | 심각도 | 리스크 | 완화 |
 |---|---|---|
-| 🔴 HIGH | ISA 문단번호가 `numbering.xml` 자동넘버링 — 단순 텍스트 파싱으로 불가 | `numbering.py` 카운터 replay 필수, Phase 1 에서 20개 수동 검증 |
+| 🔴 HIGH | ISA 문단번호 `numbering.xml` 복잡도 — 742 numId, 9종+ 패턴, numId=0 특수 케이스 303건 (CHECKPOINT 0 실측) | `numbering.py` 동적 fallback 필수 (미지 패턴 `unknown_numbering` 태깅 후 파싱 계속), Phase 1 착수 전 `docs/numbering_strategy.md` 설계, 20개 수동 검증 |
+| 🔴 HIGH | ISA-200·ISA-1200 섹션 구조 예외 | 상태머신에 특수 분기 추가, section enum 확장 (`overall_objective`) |
 | 🔴 HIGH | Qdrant 4096차원 HNSW 메모리 부담 | 로컬 실측, 필요 시 scalar quantization |
 | 🟡 MED | Upstage 4000 토큰 상한 초과 청크 | `chunk_splitter` — heading_trail 재사용, 문단 경계 우선 |
 | 🟡 MED | 4개 docx 간 style_map 상이 | Phase 4 에서 파일별 프로파일링 후 병합 |
@@ -366,3 +383,37 @@ src/·루트 설정파일. 서로 같은 파일을 편집하지 않게 할 것.
 | 일자 | 변경 |
 |---|---|
 | 2026-04-20 | 초안 작성. 사용자 결정사항 1~4 반영 |
+| 2026-04-20 | Phase 0 CHECKPOINT 0 반영: ① 결정 #5 Qdrant 전환 근거 명시, ② 결정 #3 파일별 collection 재확인, ③ Phase 1 numbering 동적 fallback 요구사항 추가 (742 numId, 9+ 패턴 실측), ④ ISA-200·ISA-1200 섹션 예외처리 명시, ⑤ 1×1 박스 표 paragraph 승격 결정, ⑥ 목차 스타일 764개 산재 규칙 추가, ⑦ 리스크 매트릭스 numbering 항목 업데이트 + ISA-200/1200 예외 리스크 추가 |
+
+---
+
+## 11. CHECKPOINT 0 기록 (2026-04-20)
+
+### Phase 0 산출물
+
+- `docs/ifrs_reference_map.md` (472줄) — IFRS 컨벤션 분석, Scout
+- `docs/isa_structure_profile.md` (466줄) — ISA 구조 프로파일, Domain Reviewer
+- `tests/fixtures/isa_profile_samples.json` — numbering.xml 샘플 raw 데이터
+- `docs/devils_advocate_checkpoint_0.md` (377줄) — 8개 비판, Go/No-Go
+- `pyproject.toml` + 13개 부트스트랩 파일 — Implementer
+
+### 검증 결과
+
+- `import audit_parser` → `v0.1.0` 통과
+- `.gitignore`: `output/`, `.embed_cache.sqlite`, `qdrant_storage/`, `tmp/` 포함. `CLAUDE.md` 제거 (커밋 대상)
+
+### Devil's Advocate 지적 처리 현황
+
+| ID | 지적 | 처리 |
+|---|---|---|
+| B1 | `.gitignore` 에 `output/` 등 누락 | **False positive** — Implementer 가 이미 추가함. DA 가 구 버전 참조 |
+| B2 | `CLAUDE.md` gitignore 에 있음 | **False positive** — Implementer 가 제거함 |
+| S1 | pgvector→Qdrant 근거 PLAN.md 미기재 | **해결** — 결정 #5 로 추가 |
+| S2 | 파일별 collection 교차 검색 trade-off | **유지** — 결정 #3 에 사유 명시, 교차 검색 요구 없음 |
+| S3 | numbering.xml fallback 미설계 | **해결** — Phase 1 numbering.py 동적 fallback 요구사항 추가 |
+| S4 | 1×1 박스 58개 처리 | **해결** — paragraph 승격 규칙 명시 |
+
+### Go/No-Go 판정
+
+**GO** — Phase 1 진입 승인. CHECKPOINT 0 팀 정리(`TeamDelete`) 후 신규 팀 소환.
+

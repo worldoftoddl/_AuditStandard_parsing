@@ -1,0 +1,378 @@
+{
+  "key_abstractNums": {
+    "15": {
+      "ilvl_0": {
+        "lvlText": "A%1.",
+        "numFmt": "decimal",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_1": {
+        "lvlText": "",
+        "numFmt": "bullet",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_2": {
+        "lvlText": "○",
+        "numFmt": "bullet",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_3": {
+        "lvlText": "%4.",
+        "numFmt": "decimal",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_4": {
+        "lvlText": "%5.",
+        "numFmt": "lowerRoman",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_5": {
+        "lvlText": "%6.",
+        "numFmt": "lowerRoman",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_6": {
+        "lvlText": "%7.",
+        "numFmt": "decimal",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_7": {
+        "lvlText": "%8.",
+        "numFmt": "upperLetter",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_8": {
+        "lvlText": "%9.",
+        "numFmt": "lowerRoman",
+        "start": "1",
+        "suff": null
+      }
+    },
+    "51": {
+      "ilvl_0": {
+        "lvlText": "A%1.",
+        "numFmt": "decimal",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_1": {
+        "lvlText": "",
+        "numFmt": "bullet",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_2": {
+        "lvlText": "○",
+        "numFmt": "bullet",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_3": {
+        "lvlText": "%4.",
+        "numFmt": "decimal",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_4": {
+        "lvlText": "%5.",
+        "numFmt": "lowerRoman",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_5": {
+        "lvlText": "%6.",
+        "numFmt": "lowerRoman",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_6": {
+        "lvlText": "%7.",
+        "numFmt": "decimal",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_7": {
+        "lvlText": "%8.",
+        "numFmt": "upperLetter",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_8": {
+        "lvlText": "%9.",
+        "numFmt": "lowerRoman",
+        "start": "1",
+        "suff": null
+      }
+    },
+    "70": {
+      "ilvl_0": {
+        "lvlText": "%1.",
+        "numFmt": "decimal",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_1": {
+        "lvlText": "(%2)",
+        "numFmt": "lowerLetter",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_2": {
+        "lvlText": "(%3)",
+        "numFmt": "lowerRoman",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_3": {
+        "lvlText": "%4.",
+        "numFmt": "lowerLetter",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_4": {
+        "lvlText": "%5.",
+        "numFmt": "lowerRoman",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_5": {
+        "lvlText": "%6.",
+        "numFmt": "lowerRoman",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_6": {
+        "lvlText": "%7.",
+        "numFmt": "decimal",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_7": {
+        "lvlText": "%8.",
+        "numFmt": "upperLetter",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_8": {
+        "lvlText": "%9.",
+        "numFmt": "lowerRoman",
+        "start": "1",
+        "suff": null
+      }
+    },
+    "98": {
+      "ilvl_0": {
+        "lvlText": "%1.",
+        "numFmt": "decimal",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_1": {
+        "lvlText": "(%2)",
+        "numFmt": "lowerLetter",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_2": {
+        "lvlText": "(%3)",
+        "numFmt": "lowerRoman",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_3": {
+        "lvlText": "%4.",
+        "numFmt": "lowerLetter",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_4": {
+        "lvlText": "%5.",
+        "numFmt": "lowerRoman",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_5": {
+        "lvlText": "%6.",
+        "numFmt": "lowerRoman",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_6": {
+        "lvlText": "%7.",
+        "numFmt": "decimal",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_7": {
+        "lvlText": "%8.",
+        "numFmt": "upperLetter",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_8": {
+        "lvlText": "%9.",
+        "numFmt": "lowerRoman",
+        "start": "1",
+        "suff": null
+      }
+    },
+    "140": {
+      "ilvl_0": {
+        "lvlText": "%1.",
+        "numFmt": "decimal",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_1": {
+        "lvlText": "(%2)",
+        "numFmt": "lowerLetter",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_2": {
+        "lvlText": "(%3)",
+        "numFmt": "lowerRoman",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_3": {
+        "lvlText": "%4.",
+        "numFmt": "lowerLetter",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_4": {
+        "lvlText": "%5.",
+        "numFmt": "lowerRoman",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_5": {
+        "lvlText": "%6.",
+        "numFmt": "lowerRoman",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_6": {
+        "lvlText": "%7.",
+        "numFmt": "decimal",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_7": {
+        "lvlText": "%8.",
+        "numFmt": "upperLetter",
+        "start": "1",
+        "suff": null
+      },
+      "ilvl_8": {
+        "lvlText": "%9.",
+        "numFmt": "lowerRoman",
+        "start": "1",
+        "suff": null
+      }
+    }
+  },
+  "numId_to_abstractNum_sample": {
+    "1": "51",
+    "2": "51",
+    "3": "81",
+    "4": "70",
+    "5": "51",
+    "6": "51",
+    "7": "51",
+    "8": "72",
+    "9": "51",
+    "10": "51",
+    "11": "51",
+    "12": "37",
+    "13": "68",
+    "14": "190",
+    "15": "125",
+    "16": "51",
+    "17": "51",
+    "18": "51",
+    "19": "51",
+    "20": "51"
+  },
+  "top_numId_usage": [
+    {
+      "numId": "86",
+      "abstractNumId": "140",
+      "count": 418,
+      "lvlText": "%1.",
+      "numFmt": "decimal"
+    },
+    {
+      "numId": "0",
+      "abstractNumId": "?",
+      "count": 303,
+      "lvlText": null,
+      "numFmt": null
+    },
+    {
+      "numId": "113",
+      "abstractNumId": "98",
+      "count": 247,
+      "lvlText": "%1.",
+      "numFmt": "decimal"
+    },
+    {
+      "numId": "118",
+      "abstractNumId": "51",
+      "count": 222,
+      "lvlText": "A%1.",
+      "numFmt": "decimal"
+    },
+    {
+      "numId": "87",
+      "abstractNumId": "140",
+      "count": 186,
+      "lvlText": "%1.",
+      "numFmt": "decimal"
+    },
+    {
+      "numId": "78",
+      "abstractNumId": "140",
+      "count": 142,
+      "lvlText": "%1.",
+      "numFmt": "decimal"
+    },
+    {
+      "numId": "8",
+      "abstractNumId": "72",
+      "count": 138,
+      "lvlText": "",
+      "numFmt": "bullet"
+    },
+    {
+      "numId": "432",
+      "abstractNumId": "1",
+      "count": 84,
+      "lvlText": "%1.",
+      "numFmt": "decimal"
+    },
+    {
+      "numId": "51",
+      "abstractNumId": "51",
+      "count": 66,
+      "lvlText": "A%1.",
+      "numFmt": "decimal"
+    },
+    {
+      "numId": "138",
+      "abstractNumId": "70",
+      "count": 66,
+      "lvlText": "%1.",
+      "numFmt": "decimal"
+    }
+  ]
+}
