@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://audit-parser.local/schema/v1.1.1.json",
+  "title": "AuditStandard ParsedStandard v1.1.1",
+  "type": "object",
+  "required": ["schema_version", "standard", "summary", "chunks", "paragraph_links"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": "1.1.1"},
+    "standard": {
+      "type": "object",
+      "required": ["standard_id", "standard_no", "standard_title", "source_file", "authority_base"],
+      "additionalProperties": false,
+      "properties": {
+        "standard_id": {"type": "string", "pattern": "^ISA-\\d{3,4}$"},
+        "standard_no": {"type": "string", "pattern": "^\\d{3,4}$"},
+        "standard_title": {"type": "string"},
+        "source_file": {"type": "string"},
+        "authority_base": {"type": "integer", "enum": [0, 1]}
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": [
+        "scope_text", "scope_markdown",
+        "definitions_text", "definitions_markdown",
+        "embedding", "embedded_at", "embedding_model"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "scope_text": {"type": ["string", "null"]},
+        "scope_markdown": {"type": ["string", "null"]},
+        "definitions_text": {"type": ["string", "null"]},
+        "definitions_markdown": {"type": ["string", "null"]},
+        "embedding": {
+          "oneOf": [
+            {"type": "null"},
+            {"type": "array", "items": {"type": "number"}, "minItems": 4096, "maxItems": 4096}
+          ]
+        },
+        "embedded_at": {"type": ["string", "null"], "format": "date-time"},
+        "embedding_model": {"type": ["string", "null"]}
+      }
+    },
+    "chunks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "chunk_id", "paragraph_id", "kind", "section", "appendix_index",
+          "heading_trail", "heading_trail_hash",
+          "content_text", "content_markdown",
+          "authority", "parent_paragraph_id", "is_application_guidance",
+          "token_estimate", "chunk_index", "chunk_of", "source_idx",
+          "part_of", "table_cells",
+          "embedding", "embedded_at", "embedding_model"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "chunk_id": {"type": "string", "minLength": 1},
+          "paragraph_id": {"type": ["string", "null"]},
+          "kind": {
+            "type": "string",
+            "enum": [
+              "requirement", "application_guidance", "sub_item", "bullet",
+              "paragraph_body", "heading", "toc_entry", "table",
+              "block_quote", "unknown_numbering"
+            ]
+          },
+          "section": {
+            "type": ["string", "null"],
+            "enum": [
+              "intro", "overall_objective", "purpose", "definitions",
+              "requirements", "application", "appendix",
+              "general_principles", "ethical_requirements", "engagement_acceptance",
+              "planning", "materiality", "risk_assessment", "risk_response",
+              "conclusion_reporting", "other_considerations", "unknown", null
+            ]
+          },
+          "appendix_index": {"type": ["integer", "null"], "minimum": 1},
+          "heading_trail": {"type": "array", "items": {"type": "string"}},
+          "heading_trail_hash": {"type": "string", "pattern": "^[0-9a-f]{8}$"},
+          "content_text": {"type": "string"},
+          "content_markdown": {"type": "string"},
+          "authority": {"type": "integer", "minimum": 0, "maximum": 1},
+          "parent_paragraph_id": {"type": ["string", "null"]},
+          "is_application_guidance": {"type": "boolean"},
+          "token_estimate": {"type": "integer", "minimum": 0},
+          "chunk_index": {"type": "integer", "minimum": 0},
+          "chunk_of": {"type": "integer", "minimum": 1},
+          "source_idx": {"type": "integer", "minimum": 0},
+          "part_of": {"type": ["string", "null"]},
+          "table_cells": {
+            "oneOf": [
+              {"type": "null"},
+              {
+                "type": "array",
+                "items": {
+                  "type": "array",
+                  "items": {"type": "string"}
+                }
+              }
+            ]
+          },
+          "embedding": {
+            "oneOf": [
+              {"type": "null"},
+              {"type": "array", "items": {"type": "number"}, "minItems": 4096, "maxItems": 4096}
+            ]
+          },
+          "embedded_at": {"type": ["string", "null"], "format": "date-time"},
+          "embedding_model": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "paragraph_links": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source", "target", "link_type"],
+        "additionalProperties": false,
+        "properties": {
+          "source": {"type": "string"},
+          "target": {"type": "string"},
+          "link_type": {"type": "string", "enum": ["guidance_of"]}
+        }
+      }
+    }
+  }
+}
