@@ -464,3 +464,82 @@ if style == 'heading 1' and ISA_BOUNDARY.match(text.strip()):
 ---
 
 *본 문서는 Phase 1 (`docx → MD`) 구현 전 Phase 0 산출물로, Parser Implementer 가 `src/audit_parser/ir/numbering.py` 및 `src/audit_parser/ir/structure.py` 를 설계할 때 참조.*
+
+---
+
+## 11. ADDENDUM — CHECKPOINT 1 검수 후 개정 (2026-04-21)
+
+> `docs/checkpoint_1_review.md` 에서 도출된 추가 실측 사실. 본 addendum 은 §2.2, §3 의 일부 기술을 **정정**한다.
+
+### 11.1 Style 레벨 numPr 상속 (§3 에 누락되어 있었음)
+
+**핵심 누락**: §3.1~§3.4 는 `word/numbering.xml` 과 문단 직접 `<w:pPr><w:numPr>` 만 기술했으나, 실제 ISA 2025 DOCX 는 **`word/styles.xml` 의 style 레벨에서 numPr 이 상속**되는 구조가 주된 메커니즘이다.
+
+#### 본 문서의 style→num 기본값 (word/styles.xml 실측)
+
+| styleId | 한글명 | based_on | 상속되는 numId | 상속되는 ilvl | 의미 |
+|---|---|---|---|---|---|
+| `a1` | 문단 | — | `119` | 0 | 요구사항 `1.`, `2.` ... |
+| `A` | 문단A | — | `105` | 0 | 적용지침 `A1.`, `A2.` ... |
+| `A0` | 불릿목록A | — | `105` | 1 | 적용지침 하위 `(1)`, `(2)` |
+| `A2` | 목록A | — | `119` | 1 | 요구사항 하위 `(1)`, `(2)` |
+| `B` | — | `A0` | `105` | 2 | 적용지침 하위 `(가)`, `(나)` |
+| `B0` | — | `A2` | `119` | 2 | 요구사항 하위 `(가)`, `(나)` |
+
+#### 실측 결과의 결정적 함의
+
+- ISA-200 의 요구사항 `1.`~`29.` · 적용지침 `A1.`~`A82.` 는 **전부 style 상속** 으로 번호 부여.
+- ISA-1200 의 요구사항 `1.`~`152.` 도 **전부 style 상속**.
+- 문단 직접 numPr 은 이들에 대해 부재 (`<w:pPr>` 에 `<w:pStyle w:val='a1'/>` 만 있음).
+- 따라서 파서는 반드시 다음 체인으로 `(numId, ilvl)` 를 해결해야 한다:
+
+```
+문단 <w:pPr><w:numPr>  >  style numPr  >  style basedOn 체인 (재귀, max depth 10)
+```
+
+세부 구현 사양은 `docs/numbering_strategy.md` §9.2~9.4 addendum 참조.
+
+### 11.2 ISA-1200 특이구조 정정 (§2.2 정정)
+
+§2.2 는 "ISA-1200 은 `목적` 섹션이 3회 등장" 으로 기술했으나, **실제 heading 2 레벨 구조는 다음과 같다** (raw DOCX 및 parsed MD 대조):
+
+| heading 2 | 역할 | 제안 section enum |
+|---|---|---|
+| 서론 | 공통 | `intro` |
+| **일반원칙과 책임** | ISA-1200 고유 | `general_principles` |
+| **감사업무의 수임 또는 유지** | ISA-1200 고유 | `engagement_acceptance` |
+| **감사 계획** | ISA-1200 고유 | `planning` |
+| **위험평가** | ISA-1200 고유 | `risk_assessment` |
+| **평가된 위험에 대한 감사인의 대응** | ISA-1200 고유 | `risk_response` |
+| **결론 및 보고** | ISA-1200 고유 | `conclusion_reporting` |
+| 보론 1 용어의 정의 | 공통 (부록) | `appendix` |
+| 보론 2 감사보고서 | 공통 (부록) | `appendix` |
+
+총 **9 개 heading 2** 중 **6 개가 ISA-1200 고유** section 이다. §2.1 표의 `| 1200 | O | - | O | O | - | - | - |` 에서 `목적` O 표시는 **오류**로 보이며, 정정해야 한다(본 ISA 는 `목적` heading 2 를 갖지 않고 `일반원칙과 책임` 이하 custom heading 으로 구성됨).
+
+> ISA-1200 은 `요구사항` / `적용 및 기타 설명자료` 의 대립 구조를 갖지 않고, 감사 수명주기(수임→계획→위험평가→대응→보고) 축을 따라 재편된 특수 기준서다. `structure.py` 는 SECTION_ENUM 을 위 6 개로 확장 필요.
+
+### 11.3 §10.3 heading→section 매핑 확장
+
+§10.3 은 "표준 5 섹션 + appendix" 기반 매핑만 제시했다. ISA-1200 지원을 위해 다음을 추가해야 한다:
+
+| heading 2 텍스트 | section enum |
+|---|---|
+| 일반원칙과 책임 | `general_principles` |
+| 감사업무의 수임 또는 유지 | `engagement_acceptance` |
+| 감사 계획 | `planning` |
+| 위험평가 | `risk_assessment` |
+| 평가된 위험에 대한 감사인의 대응 | `risk_response` |
+| 결론 및 보고 | `conclusion_reporting` |
+
+`structure.py` 의 section enum 정의에 위 6 개를 추가하고 heading2 → section 매핑 딕셔너리를 확장한다. ISA-200 의 `감사인의 전반적인 목적` 은 기존 `overall_objective` 를 그대로 사용.
+
+### 11.4 CHECKPOINT 1 결함 요약 (참조)
+
+| ID | 심각도 | 내용 | 해결 경로 |
+|---|---|---|---|
+| F1 | CRITICAL | style 상속 미구현으로 820+ numbered 문단 손실 | `numbering_strategy.md` §9 addendum |
+| F2 | HIGH | ISA-1200 heading 2 section enum 미매핑 | 본 addendum §11.2, §11.3 |
+| F3 | MED | An→n parent 링크 끊김 | F1 해결의 부수효과로 자동 복구 |
+
+본 addendum 및 `numbering_strategy.md` §9 addendum 을 `parser-implementer-2` 의 rework (2026-04-21 요청) 근거 문서로 활용.

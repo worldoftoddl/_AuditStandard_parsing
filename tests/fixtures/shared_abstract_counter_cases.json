@@ -1,0 +1,139 @@
+{
+  "_meta": {
+    "name": "shared_abstract_counter_cases",
+    "purpose": "Regression fixture for NumberingEngine counter sharing across numIds that reference the same abstractNumId (CHECKPOINT 1 F4 fix, 2차 rework).",
+    "spec_doc": "docs/checkpoint_1_review.md §R2.5",
+    "author": "audit-standard-domain-reviewer",
+    "created": "2026-04-21",
+    "schema_version": "1.0"
+  },
+  "numbering_xml_fixture": {
+    "_note": "Simplified numbering.xml subset matching ISA 2025 structure. abstractNum 51 (application A%1.) shared by numId 57 and 105; abstractNum 98 (requirement %1.) shared by numId 119 and 156.",
+    "abstract_nums": {
+      "51": {
+        "abstractNumId": "51",
+        "levels": {
+          "0": {"ilvl": 0, "lvlText": "A%1.", "numFmt": "decimal", "start": 1}
+        }
+      },
+      "98": {
+        "abstractNumId": "98",
+        "levels": {
+          "0": {"ilvl": 0, "lvlText": "%1.", "numFmt": "decimal", "start": 1}
+        }
+      }
+    },
+    "num_defs": {
+      "57":  {"numId": "57",  "abstractNumId": "51", "level_overrides": {"0": 1}},
+      "105": {"numId": "105", "abstractNumId": "51", "level_overrides": {}},
+      "119": {"numId": "119", "abstractNumId": "98", "level_overrides": {}},
+      "156": {"numId": "156", "abstractNumId": "98", "level_overrides": {"0": 1}},
+      "86":  {"numId": "86",  "abstractNumId": "140","level_overrides": {}}
+    }
+  },
+  "test_cases": [
+    {
+      "case_id": "C1",
+      "description": "Primary ISA-200 scenario: numId=57 (override-51) first use emits A1, then numId=105 (same abstractNum 51) continues from A2.",
+      "sequence": [
+        {"numId": "57",  "ilvl": 0, "expected_paragraph_id": "A1."},
+        {"numId": "105", "ilvl": 0, "expected_paragraph_id": "A2."},
+        {"numId": "105", "ilvl": 0, "expected_paragraph_id": "A3."},
+        {"numId": "105", "ilvl": 0, "expected_paragraph_id": "A4."}
+      ]
+    },
+    {
+      "case_id": "C2",
+      "description": "Inverse order: numId=105 first → A1, then numId=57 (startOverride=1) resets counter → A1 again (rare but spec-compliant restart).",
+      "sequence": [
+        {"numId": "105", "ilvl": 0, "expected_paragraph_id": "A1."},
+        {"numId": "105", "ilvl": 0, "expected_paragraph_id": "A2."},
+        {"numId": "57",  "ilvl": 0, "expected_paragraph_id": "A1."},
+        {"numId": "105", "ilvl": 0, "expected_paragraph_id": "A2."}
+      ],
+      "_note": "After numId=57 resets abstractNum 51 to 1, next numId=105 continues → A2. DO NOT emit A3 here."
+    },
+    {
+      "case_id": "C3",
+      "description": "ISA-1200 scenario: numId=156 (override-98) first → 1., then numId=119 (same abstractNum 98) continues 2, 3, 4.",
+      "sequence": [
+        {"numId": "156", "ilvl": 0, "expected_paragraph_id": "1."},
+        {"numId": "119", "ilvl": 0, "expected_paragraph_id": "2."},
+        {"numId": "119", "ilvl": 0, "expected_paragraph_id": "3."},
+        {"numId": "119", "ilvl": 0, "expected_paragraph_id": "4."}
+      ]
+    },
+    {
+      "case_id": "C4",
+      "description": "ISA boundary reset: after reset() call, counters AND override_applied are cleared. numId=57 can restart to A1 again in the NEW ISA even though it already fired in the previous ISA.",
+      "sequence": [
+        {"numId": "57",  "ilvl": 0, "expected_paragraph_id": "A1."},
+        {"numId": "105", "ilvl": 0, "expected_paragraph_id": "A2."},
+        {"numId": "105", "ilvl": 0, "expected_paragraph_id": "A3."},
+        {"action": "reset"},
+        {"numId": "57",  "ilvl": 0, "expected_paragraph_id": "A1."},
+        {"numId": "105", "ilvl": 0, "expected_paragraph_id": "A2."}
+      ]
+    },
+    {
+      "case_id": "C5",
+      "description": "startOverride applies once per (numId, ilvl). If numId=57 appears twice in the same ISA (no reset), the second appearance does NOT re-reset.",
+      "sequence": [
+        {"numId": "57",  "ilvl": 0, "expected_paragraph_id": "A1."},
+        {"numId": "105", "ilvl": 0, "expected_paragraph_id": "A2."},
+        {"numId": "57",  "ilvl": 0, "expected_paragraph_id": "A3."},
+        {"numId": "105", "ilvl": 0, "expected_paragraph_id": "A4."}
+      ],
+      "_note": "Second numId=57 must NOT reset — override_applied guard prevents double-reset."
+    },
+    {
+      "case_id": "C6",
+      "description": "Different abstractNums stay independent. abstractNum 51 and 98 maintain separate counters.",
+      "sequence": [
+        {"numId": "105", "ilvl": 0, "expected_paragraph_id": "A1."},
+        {"numId": "119", "ilvl": 0, "expected_paragraph_id": "1."},
+        {"numId": "105", "ilvl": 0, "expected_paragraph_id": "A2."},
+        {"numId": "119", "ilvl": 0, "expected_paragraph_id": "2."}
+      ]
+    },
+    {
+      "case_id": "C7",
+      "description": "Non-shared abstractNum (numId=86, abstractNum=140) works as before — counter regression guard.",
+      "sequence": [
+        {"numId": "86", "ilvl": 0, "expected_paragraph_id": "1."},
+        {"numId": "86", "ilvl": 0, "expected_paragraph_id": "2."},
+        {"numId": "86", "ilvl": 0, "expected_paragraph_id": "3."}
+      ]
+    },
+    {
+      "case_id": "C8",
+      "description": "numId=0 suppress does NOT advance counter and does NOT emit paragraph_id — regression guard.",
+      "sequence": [
+        {"numId": "105", "ilvl": 0, "expected_paragraph_id": "A1."},
+        {"numId": "0",   "ilvl": 0, "expected_paragraph_id": ""},
+        {"numId": "105", "ilvl": 0, "expected_paragraph_id": "A2."}
+      ]
+    }
+  ],
+  "integration_assertions": {
+    "_note": "After rework, these MUST hold in output/md/.",
+    "global_duplicate_label_count": 0,
+    "isa_200": {
+      "unique_app_labels_range": ["A1.", "A83."],
+      "duplicate_labels": 0,
+      "req_label_range": ["1.", "24."]
+    },
+    "isa_1200": {
+      "unique_req_labels_range": ["1.", "153."],
+      "duplicate_labels": 0
+    },
+    "isa_570": {
+      "duplicate_labels": 0,
+      "_note": "이전 중복 9종 모두 해소"
+    },
+    "isa_550": {
+      "first_req_paragraph_id": "1.",
+      "_note": "numId=86 기존 동작 회귀 없음"
+    }
+  }
+}

@@ -1,0 +1,228 @@
+{
+  "_meta": {
+    "name": "style_numpr_cases",
+    "purpose": "Regression fixture for resolve_paragraph_numPr() — style-inherited numPr chain resolution (CHECKPOINT 1 F1 fix).",
+    "spec_doc": "docs/numbering_strategy.md §9.3, §9.4",
+    "author": "audit-standard-domain-reviewer",
+    "created": "2026-04-21",
+    "schema_version": "1.0"
+  },
+  "style_index_fixture": {
+    "_note": "Realistic subset of word/styles.xml from raw/0. 회계감사기준 전문(2025 개정).docx. Used as style_index argument to resolve_paragraph_numPr().",
+    "a1": {
+      "style_id": "a1",
+      "based_on": null,
+      "num_id": "119",
+      "ilvl": 0,
+      "_comment": "문단 — requirement style (1., 2., ...) via abstractNum 98"
+    },
+    "A": {
+      "style_id": "A",
+      "based_on": null,
+      "num_id": "105",
+      "ilvl": 0,
+      "_comment": "문단A — application_guidance style (A1., A2., ...) via abstractNum 51"
+    },
+    "A0": {
+      "style_id": "A0",
+      "based_on": null,
+      "num_id": "105",
+      "ilvl": 1,
+      "_comment": "불릿목록A — application sub_item"
+    },
+    "A2": {
+      "style_id": "A2",
+      "based_on": null,
+      "num_id": "119",
+      "ilvl": 1,
+      "_comment": "목록A — requirement sub_item"
+    },
+    "B": {
+      "style_id": "B",
+      "based_on": "A0",
+      "num_id": null,
+      "ilvl": 2,
+      "_comment": "basedOn=A0 체인, ilvl override=2 — (가), (나) application"
+    },
+    "B0": {
+      "style_id": "B0",
+      "based_on": "A2",
+      "num_id": null,
+      "ilvl": 2,
+      "_comment": "basedOn=A2 체인, ilvl override=2 — (가), (나) requirement"
+    },
+    "NormalText": {
+      "style_id": "NormalText",
+      "based_on": null,
+      "num_id": null,
+      "ilvl": null,
+      "_comment": "No numPr at any level — paragraph_body"
+    },
+    "CycleX": {
+      "style_id": "CycleX",
+      "based_on": "CycleY",
+      "num_id": null,
+      "ilvl": null,
+      "_comment": "cycle detection test — X→Y→X"
+    },
+    "CycleY": {
+      "style_id": "CycleY",
+      "based_on": "CycleX",
+      "num_id": null,
+      "ilvl": null,
+      "_comment": "cycle pair"
+    }
+  },
+  "test_cases": [
+    {
+      "case_id": "C1",
+      "description": "No paragraph-direct numPr + style=a1 → style numPr 상속 (flagship case — ISA-200 요구사항 1.~24. 이 전부 이 케이스)",
+      "input": {
+        "p_numPr": null,
+        "style_id": "a1"
+      },
+      "expected": {
+        "numId": "119",
+        "ilvl": 0,
+        "resolution_path": "style a1 direct"
+      }
+    },
+    {
+      "case_id": "C2",
+      "description": "Paragraph numPr numId=0 (suppress) + style=a1 → paragraph 직접 numPr 가 우선, downstream advance() 에서 numbering_suppressed=True 판정",
+      "input": {
+        "p_numPr": ["0", 0],
+        "style_id": "a1"
+      },
+      "expected": {
+        "numId": "0",
+        "ilvl": 0,
+        "resolution_path": "paragraph direct (suppress — advance() 가 후속 처리)"
+      }
+    },
+    {
+      "case_id": "C3",
+      "description": "Paragraph ilvl override only (numId 없음, ilvl=1) + style=A → style numId + 문단 ilvl 결합 (드문 edge case)",
+      "input": {
+        "p_numPr": [null, 1],
+        "style_id": "A"
+      },
+      "expected": {
+        "numId": "105",
+        "ilvl": 1,
+        "resolution_path": "style A numId + paragraph ilvl override"
+      },
+      "_note": "p_numPr 의 numId가 null 이면 style 의 numId, ilvl 은 문단값 우선. 구현이 이 semantics 를 지원하지 않아도 되는 경우 C3 는 생략 가능 (실제 DOCX 에서 관찰되지 않음)."
+    },
+    {
+      "case_id": "C4",
+      "description": "No paragraph numPr + style=B0 → basedOn=A2 체인 해결 → A2 의 numId=119 상속, B0 의 ilvl=2 사용",
+      "input": {
+        "p_numPr": null,
+        "style_id": "B0"
+      },
+      "expected": {
+        "numId": "119",
+        "ilvl": 2,
+        "resolution_path": "B0 → A2 basedOn, B0.ilvl=2 override A2.ilvl=1"
+      }
+    },
+    {
+      "case_id": "C5",
+      "description": "Style ID 가 styles.xml 에 존재하지 않음 → None + warn",
+      "input": {
+        "p_numPr": null,
+        "style_id": "NonExistentStyle"
+      },
+      "expected": {
+        "numId": null,
+        "ilvl": null,
+        "resolution_path": "missing styleId (warn)"
+      }
+    },
+    {
+      "case_id": "C6",
+      "description": "basedOn cycle (X→Y→X) → cycle guard 발동, None + warn",
+      "input": {
+        "p_numPr": null,
+        "style_id": "CycleX"
+      },
+      "expected": {
+        "numId": null,
+        "ilvl": null,
+        "resolution_path": "cycle detected (max_depth or visited set)"
+      }
+    },
+    {
+      "case_id": "C7",
+      "description": "No paragraph numPr + style=NormalText → style 에 numPr 없고 basedOn 도 없음 → None",
+      "input": {
+        "p_numPr": null,
+        "style_id": "NormalText"
+      },
+      "expected": {
+        "numId": null,
+        "ilvl": null,
+        "resolution_path": "no numPr in style chain"
+      }
+    },
+    {
+      "case_id": "C8",
+      "description": "Paragraph direct numPr (numId=86) + style=a1 → 문단 직접값이 style 상속을 우선 (ISA 본문 시나리오)",
+      "input": {
+        "p_numPr": ["86", 0],
+        "style_id": "a1"
+      },
+      "expected": {
+        "numId": "86",
+        "ilvl": 0,
+        "resolution_path": "paragraph direct wins over style"
+      }
+    },
+    {
+      "case_id": "C9",
+      "description": "No paragraph numPr + style_id=null (문단 pStyle 미지정) → None (default paragraph style 은 고려하지 않음)",
+      "input": {
+        "p_numPr": null,
+        "style_id": null
+      },
+      "expected": {
+        "numId": null,
+        "ilvl": null,
+        "resolution_path": "no style specified"
+      }
+    }
+  ],
+  "integration_assertions": {
+    "_note": "parser-implementer-2 rework 이후 output/md/ 재생성 시 본 검수자가 확인할 통합 기준. 단위 테스트 아님.",
+    "ISA-200": {
+      "required_markers_present": ["A1.", "A10.", "A50.", "A83."],
+      "requirement_count_min": 24,
+      "requirement_count_max": 24,
+      "application_count_min": 83,
+      "_correction_note": "2026-04-21 정정: 초기 원고의 min=29 는 오류. raw DOCX style='a1' 실측 24 건, TOC 권위 '요구사항 1-24' 일치. 적용지침은 TOC 권위 'A1-A83' 이므로 min=83 (F4 counter-sharing fix 시 A1-A83 연속)."
+    },
+    "ISA-500": {
+      "required_markers_present": ["A1.", "A30.", "A64."],
+      "application_count_min": 64
+    },
+    "ISA-1200": {
+      "required_markers_present": ["1.", "50.", "100.", "152."],
+      "requirement_count_min": 152,
+      "section_enums_present": [
+        "intro",
+        "general_principles",
+        "engagement_acceptance",
+        "planning",
+        "risk_assessment",
+        "risk_response",
+        "conclusion_reporting",
+        "appendix"
+      ]
+    },
+    "global": {
+      "unknown_numbering_rate_max": 0.05,
+      "isa_boundary_reset": "numId 105 and 119 counters MUST reset to start (A1. / 1.) at each heading-1 transition"
+    }
+  }
+}
