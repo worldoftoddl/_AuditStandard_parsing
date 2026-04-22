@@ -86,7 +86,7 @@ def test_frontmatter_basic(tmp_path: Path) -> None:
     f.write_text(md, encoding="utf-8")
     p = parse_md(f)
     assert p is not None
-    assert p.schema_version == JSON_SCHEMA_VERSION == "1.1.1"
+    assert p.schema_version == JSON_SCHEMA_VERSION == "1.1.2"
     assert p.standard.standard_id == "ISA-200"
     assert p.standard.standard_no == "200"
     assert p.standard.standard_title == '제"목" with \\backslash'
@@ -698,7 +698,7 @@ def test_parse_md_accepts_supported_schema_version(tmp_path: Path) -> None:
     md.write_text(_MIN_VALID_FRONTMATTER, encoding="utf-8")
     parsed = parse_md(md)
     assert parsed is not None
-    assert parsed.schema_version == JSON_SCHEMA_VERSION  # JSON 출력은 "1.1.1"
+    assert parsed.schema_version == JSON_SCHEMA_VERSION  # JSON 출력은 "1.1.2"
     assert parsed.standard.standard_id == "ISA-999"
 
 

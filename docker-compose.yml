@@ -2,9 +2,16 @@ services:
   qdrant:
     image: qdrant/qdrant:latest
     container_name: audit_standards_qdrant
+    # 127.0.0.1 바인딩 — 로컬 개발 한정, 외부 노출 차단.
     ports:
-      - "6333:6333"
-      - "6334:6334"
+      - "127.0.0.1:6333:6333"
+      - "127.0.0.1:6334:6334"
     volumes:
-      - ./qdrant_storage:/qdrant/storage
+      - audit_qdrant_storage:/qdrant/storage
     restart: unless-stopped
+
+volumes:
+  # named volume — bind mount(./qdrant_storage) 대비 호스트 경로 의존 제거.
+  # 데이터 초기화: `docker compose down -v`.
+  audit_qdrant_storage:
+    name: audit_qdrant_storage

@@ -39,7 +39,7 @@ def test_all_isa_json_conform_to_schema_v1_1(validator: Draft202012Validator) ->
         data = json.loads(path.read_text(encoding="utf-8"))
         errors = sorted(validator.iter_errors(data), key=lambda e: list(e.absolute_path))
         assert not errors, f"{path.name}: {[e.message for e in errors[:3]]}"
-        assert data["schema_version"] == "1.1.1", path.name
+        assert data["schema_version"] == "1.1.2", path.name
 
 
 @pytest.mark.skipif(not _JSON_FILES, reason="output/json/ 에 36 JSON 필요 (ingest 선행)")

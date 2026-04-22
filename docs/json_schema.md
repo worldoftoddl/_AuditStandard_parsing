@@ -466,15 +466,43 @@ def resolve_chunk_id_collisions(chunks: list[ChunkRecord]) -> None:
 
 > **Standard ID prefix 규약 (v1.1 확정):** chunk_id 는 **`ISA-` prefix 포함** (`ISA-300:...`). 이전 v1.0 draft 에서 `300:...` 형태 예시가 혼재했으나 §6.1/§6.3/§6.4 전체를 `standard_id` (`"ISA-300"`) 로 통일. payload 에도 `standard_id` 포함 저장 (§13).
 
-### 6.5 Qdrant `point.id` 와의 관계
+### 6.5 Qdrant `point.id` 와의 관계 (v1.1.2 사실 교정)
 
-Qdrant 는 `point.id` 로 **UUID 또는 양의 정수**만 허용. `chunk_id` 는 사람이 읽는 payload 필드이고, `point.id` 는 별도로 생성:
+Qdrant 는 `point.id` 로 **UUID 또는 양의 정수**만 허용. `chunk_id` 는 사람이 읽는 payload 필드이고, `point.id` 는 별도로 생성 — **결정성 보장 + Qdrant 요구 format**:
 
 ```python
-point_id = uuid.uuid5(uuid.NAMESPACE_URL, chunk_id)
+# src/audit_parser/ingest/qdrant_writer.py
+import uuid
+_QDRANT_POINT_NAMESPACE = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
+# 값은 RFC 4122 Appendix C 의 NAMESPACE_DNS 와 동일 (uuid.NAMESPACE_DNS 등가)
+
+point_id = str(uuid.uuid5(_QDRANT_POINT_NAMESPACE, chunk_id))
 ```
 
-`qdrant_writer.py` 담당. 본 스키마의 `chunk_id` 는 payload `external_id` 로 저장되어 Qdrant scroll/filter 로 검색 가능.
+`qdrant_writer.py` 담당. 본 스키마의 `chunk_id` 는 payload 에 그대로 저장되어 Qdrant scroll/filter 로 검색 가능.
+
+**⚠ Frozen constant 경고 (v1.1.2 신설)**: `_QDRANT_POINT_NAMESPACE` 값 `6ba7b810-9dad-11d1-80b4-00c04fd430c8` 은 **동결 상수**. 변경 시 다음 breaking change 전수 발생:
+
+- 기존 collection 의 `point.id` 전량 재계산 → 업서트 불일치 → **collection 전수 re-index** 필요 (8,626 points 기준 ~350s 재적재, Phase 4 통합 시 비례 증가).
+- `.embed_cache.sqlite` 의 `chunk_id → embedding` 캐시는 namespace 변경 영향 없음 (cache key 는 `chunk_id` 자체). 단 재적재 시 Qdrant 쪽 orphan point 정리 필요.
+- 본 변경은 **v2.0 MAJOR trigger** 에 해당 (C4/§2.2 SemVer 정책). v1.x 유지 범위 내에서는 namespace 변경 금지. Phase 4+ 신규 DOCX (ISQM-1 / 인증개념 / 기타인증) 통합 시에도 **동일 namespace 유지 필수**.
+
+#### 6.5.1 ⚠ v1.1 ~ v1.1.1 spec-implementation divergence 경고 (v1.1.2 정정)
+
+> **본 정정은 단순 typo 가 아니라 spec-implementation divergence — reproducibility hazard 수준**. 외부 컨슈머가 구 spec literal 구현 시 **collection 전수 orphan** 경험 가능.
+
+**과거 결함**: v1.1 ~ v1.1.1 의 §6.5 는 `point_id = uuid.uuid5(uuid.NAMESPACE_URL, chunk_id)` 로 기재되어 있었으나 실제 `qdrant_writer.py` 구현은 `NAMESPACE_DNS` 상수 사용. RFC 4122 표준 UUID 는 **한 hex digit 차이** 로 완전히 다른 값:
+
+| namespace | UUID |
+|---|---|
+| `uuid.NAMESPACE_DNS` (**실 구현**) | `6ba7b81` **`0`** `-9dad-11d1-80b4-00c04fd430c8` ← |
+| `uuid.NAMESPACE_URL` (**구 spec 오기재**) | `6ba7b81` **`1`** `-9dad-11d1-80b4-00c04fd430c8` |
+
+UUID5 알고리즘의 namespace 입력이 1바이트 다르면 **모든 `point_id` 가 전혀 다른 UUID 로 산출됨**. 즉:
+- **실 적재 현황**: Qdrant collection `audit_standards_회계감사기준_2025` 의 8,626 points 는 전수 **DNS-derived UUIDs**
+- **구 spec literal 구현 시**: URL-derived UUIDs 생성 → 기존 point 와 단 하나도 일치 안 함 → 외부 컨슈머 (예: Phase 4+ 통합 팀, 외부 RAG deploy 팀) 가 "내가 만든 point 가 기존 DB 에 왜 없지?" 디버깅 수 시간 소요
+
+**v1.1.2 정정**: 실 구현 기준 (`NAMESPACE_DNS`) 으로 spec 을 정정. **외부 컨슈머는 본 정정본 기준 구현 필수**. 구 v1.1/v1.1.1 spec 기반 구현은 point_id mismatch 야기하므로 즉시 본 §6.5 로 sync 요망. (Finding F2 — `docs/checkpoint_3_review.md §6`)
 
 ---
 
@@ -853,7 +881,7 @@ def make_guidance_link(
   "required": ["schema_version", "standard", "summary", "chunks", "paragraph_links"],
   "additionalProperties": false,
   "properties": {
-    "schema_version": {"const": "1.1.1"},
+    "schema_version": {"const": "1.1.2"},
     "standard": {
       "type": "object",
       "required": ["standard_id", "standard_no", "standard_title", "source_file", "authority_base"],
@@ -1084,6 +1112,38 @@ jq -r '.chunks[] | select(.paragraph_id == "12.") | .chunk_id' output/json/ISA-2
 
 ---
 
+## 15a. v1.2 MINOR bump Candidates (CP3 실측 기반, 2026-04-22 신설)
+
+CHECKPOINT 3 (Phase 3 Qdrant 적재 검수) 의 DEFER 5건 + New Findings 실측 결과를 바탕으로, **v1.2 MINOR bump 후보** 와 **v1.1.2 PATCH 선처리 항목** 을 일괄 가시화. 근거 문서: [`docs/checkpoint_3_review.md §7`](./checkpoint_3_review.md), [`docs/devils_advocate_checkpoint_3.md`](./devils_advocate_checkpoint_3.md) (예정).
+
+| # | 후보 | 근거 섹션 | CP3 실측 결과 | Trigger 충족? | 분류 | 우선순위 |
+|---:|---|---|---|---|---|---|
+| 1 | **F5 suffix `{kind}#sha1-content` fallback** | §6.4, C-P2-1 | trimmed mean **42.64%** (upper bound; per-ISA max 73.8% ISA-720 / min 13.5% ISA-530) — realized ratio = UB × P(재파싱) × P(초반 삽입) × f(삽입 개수) | ⚠️ REPORT (Phase 4 실측 의무). **자동 trigger 조건: `realized_annual_cache_invalidation > 200%` → v1.2 MINOR bump 자동 발동** | **v1.2 MINOR** | **1순위** |
+| 2 | Stale suffix cleanup 정규 scheduler | §8.4, C-P2-9 | stale 0 (현 시점) | ❌ 현 시점 미해당 | v1.2 MINOR (조건부) | Phase 4 stale 실측 후 재판정 |
+| 3 | Phase 4 standard_id prefix 확장 (chunk_id regex) | §3 standard, §5.2, §6.1 | 현 v1.1.1 prefix (`ISA-`) 만. ISQM 1 / 인증개념 / 기타인증 통합 시 확장 필요 여부 | Phase 4 착수 시 결정 | v1.2 MINOR | Phase 4 scope (Domain Reviewer + Critic 공동 결정) |
+| 4 | ~~Header-suppression rule~~ | ~~§9.5, C-P2-3~~ | 0% co-occur / 0.2046 avg dist (ISA-1200 #11079 한정) | ❌ 미해당 | **제외** | — |
+| 5 | ~~soft_limit 축소~~ | ~~§9.3, C-P2-6~~ | Solar ratio mean 0.5175 / max 0.6667 (역방향, 2× 여유) | ❌ 제외 | **제외** | — |
+| 6 | **F1 Named vector zero-padding 제거** | §13 payload, Finding F1 | chunk summary slot 500/500 zero + summary passage slot 36/36 zero (전수 census) | ✅ 선처리 | **v1.1.2 PATCH** | Task #9 in_progress |
+| 7 | **F2 §6.5 UUID namespace fact fix + frozen note** | §6.5, Finding F2 | 기존 `NAMESPACE_URL` 문서 오류 + frozen 경고 부재 | ✅ 선처리 | **v1.1.2 PATCH** | v1.1.2 동반 (본 문서 §6.5 적용 완료) |
+
+### 15a.1 Phase 4 의무 체크 (C-P2-1 에스컬레이션 트리거)
+
+Critic cross-check §3.3 반영, Phase 4 CHECKPOINT 4 의 **의무 섹션 3-tier**:
+
+1. **재파싱 빈도 기록 의무화** — ISQM-1 / 인증개념 / 기타인증 DOCX revision 기반 실측.
+2. **자동 트리거 임계치**: `realized_annual_cache_invalidation > 200%` → v1.2 MINOR bump 자동 발동 (후보 #1).
+3. **Phase 4 CHECKPOINT 4 scope 필수 섹션**: `docs/checkpoint_4_review.md` 내 "C-P2-1 재평가 결과" 섹션 부재 시 rework 처리.
+
+### 15a.2 Chunk_id regex 확장 scope 결정 절차 (Phase 4)
+
+후보 #3 (Phase 4 standard_id prefix 확장) 처리 시:
+
+- **공동 결정 주체**: Domain Reviewer + Critic + Parser Implementer (3자 합의)
+- **변경 scope**: `§6.1 chunk_id pattern`, `§3 standard.standard_id pattern`, `§12 JSON Schema` 3 곳 동기화
+- **하위 호환성**: v1.x 범위 유지 가능 여부 검토 (prefix 추가 = backward-compat MINOR, prefix 정의 변경 = MAJOR)
+
+---
+
 ## 16. Changelog
 
 | Version | 일자 | 변경 |
@@ -1092,6 +1152,7 @@ jq -r '.chunks[] | select(.paragraph_id == "12.") | .chunk_id' output/json/ISA-2
 | 1.0 (rev 2026-04-21 PM) | 2026-04-21 | parser-implementer 5 항 답변 반영 (v1.0 draft revision): (a) `table_cells: List[List[str]] \| null` 신규 필드 — MD table inverse-parse; (b) §6.4 fallback 포맷 `{kind}#{source_idx}` 로 변경 (이전 `#{source_idx}` → 4-segment 유지 목적); (c) `standard_id` prefix `ISA-` 일관화; (d) `part_of: str \| null` 신규 필드 — chunk 분할 역추적; (e) §7.2.1 un-numbered 보론 = `appendix_index=1` 규약 (4 ISA 리스트, 추후 오류 확인); (f) §10.0 pipe escape 절충 정책 (generator freeze + parser forward-compat); (g) §1.1 prelude skip 규약 명시. |
 | **1.1** | **2026-04-21 EVE** | **MINOR bump — devils-advocate-critic advisory 3 건 대응 + team-lead 지시 반영**. Backward-compatible (JSON 아직 미생성). 주요 변경: <br> • **§6.1 F4 실측 정정** — v1.0 의 "6 쌍 모두 heading_trail 해소" 주장 오류. MD 재검증 결과 **ISA-300 `7.` 와 ISA-701 `4.` 2 쌍은 heading_trail 동일 → composite key 충돌**. `f4_known_duplicates.md §4.2` open item 이 negative 로 확정. <br> • **§6.4 2-Pass chunk_id 알고리즘 신설** — Pass 1 candidate 생성, Pass 2 Counter 기반 collision 감지 후 전원에 `#{source_idx}` suffix 부착 (deterministic). F4 2 쌍 해소 확정. <br> • **§6.2 heading_trail `.strip()` 정규화 규범화** — canonical form 명시. <br> • **§6.2.1 sha1[:8] 충돌 감지 규범 신설** — 5,400 chunk × birthday 2^-32 ≈ 0.0034 건 기댓값, 비-zero. `assert_chunk_id_uniqueness` 필수. <br> • **§7.2.1 un-numbered 보론 리스트 4 → 9 정정** — ISA-230, 300, 510, 570, 620, 700, 705, 710, 1100 전수 (MD `^### 보론` grep 실측). <br> • **§9.4 대형 table 분할 정책 신설** — ISA-1200 66×2 대응, row-wise split + header replication. <br> • **§12 JSON Schema `schema_version: {"const": "1.1"}`** 갱신. <br> • MD frontmatter `md_renderer.SCHEMA_VERSION = "1.0"` **불변** (JSON 만 bump, 독립 카운터 정책 §2.3 적용). |
 | **1.1.1** | **2026-04-21 EVE+** | **PATCH bump — CHECKPOINT 2 검수 및 devils-advocate-critic Task #7 (v1.1.1 batch) 대응. 구조 불변, 문서 명확화만.** 적재된 chunks·paragraph_links·payload 바이트 동등성 보장 → 재임베딩·재적재 불필요. 주요 변경: <br> • **§2.2 PATCH row 추가 + 조건부 MINOR 판정 각주** — v1.1 의 `chunk_id` 출력 변경이 MINOR 로 처리된 근거 2 조건 (v1.0 데이터 0건, 외부 consumer 부재) 명시. Phase 4 RAG deploy 후에는 `chunk_id` format 확장이 **항상 MAJOR** 라는 forward 규약 고정. <br> • **§8.4 Idempotency 적용 범위 한정 신설** — `source_idx` suffix 의 재실행 idempotency 가 보장되는 2 조건 (md_parser 불변 + cluster 구성원 불변) 명시. 최대 cluster 실측 **ISA-720 201 members** (`appendix:3d4ed148:paragraph_body` stem) 기록. Phase 3 incremental ingest 시 stale suffix 처리 지침 추가. <br> • **§9.5 ISA-1200 header 중복 bias finding 신설** — "용어의 정의" 3회 복제가 Upstage passage embedding 을 왜곡할 가능성. **Phase 3 측정 프로토콜 (10 seed query top-5, 동시 출현 ≥30% 또는 cosine Δ<0.01 시 v1.2 MINOR bump 로 header-suppression 규칙 도입)** 을 조건부 이월. 현 v1.1.1 단계에서는 finding 기록만. <br> • **§12 JSON Schema `schema_version: {"const": "1.1.1"}`** 갱신. <br> • 근거 문서: [`docs/devils_advocate_checkpoint_2.md`](./devils_advocate_checkpoint_2.md) §2/§3, [`docs/checkpoint_2_review.md`](./checkpoint_2_review.md) §3.3. |
+| **1.1.2** | **2026-04-22** | **PATCH bump — CHECKPOINT 3 (Phase 3 Qdrant 적재 검수) 의 2 Finding + Critic cross-check 강화 권고 3건 일괄 반영. 문서 + qdrant_writer.py 업서트 로직 최적화, schema 구조 불변.** 주요 변경: <br> • **Finding F1 — Named vector zero-padding 제거 (Task #9 parser-implementer rework, 1/2 rework budget)**: chunk points 의 `summary` 슬롯 + summary points 의 `passage` 슬롯에 전수 `[0.0]*4096` 이 적재되던 현상 확정 (chunk 500/500 census + summary 36/36 census, Domain Reviewer + Critic 양측 독립 census 일치). `qdrant_writer.py` 업서트 시 사용되지 않는 named vector 슬롯을 **per-point omit** 하여 `indexed_vectors_count 17,252 → 8,626` 감소 (≈50%), 저장 **~137~141 MB 절감** (Domain 137MB 추정 / Critic Qdrant scroll 141MB census — ±5% 일관). HNSW edges 276,032 → ~138,016. 재적재 필요하나 embedding cache (SQLite) 는 보존. <br> • **§6.5 namespace spec-implementation divergence 사실 교정 (독립 bullet)**: 구 v1.1 ~ v1.1.1 §6.5 의 `uuid.NAMESPACE_URL` (UUID `6ba7b811-...`) 기재는 **reproducibility hazard 수준의 spec-implementation divergence** — 실제 `qdrant_writer.py` 구현은 `_QDRANT_POINT_NAMESPACE = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")` (NAMESPACE_DNS 등가) 사용. 한 hex digit 차이로 UUID5 출력 전수 상이 → 외부 컨슈머 literal 구현 시 collection 전수 orphan. v1.1.2 에서 **실 구현 기준으로 spec 정정 + §6.5.1 경고 박스 신설**. 외부 컨슈머는 본 정정본 기준 재sync 필수. <br> • **§6.5 Frozen constant 경고 신설**: `_QDRANT_POINT_NAMESPACE` 변경 = v2.0 MAJOR trigger. collection 전수 re-index + embedding cache orphan. Phase 4+ 신규 DOCX 통합 시에도 동일 namespace 유지 의무. <br> • **C-P2-1 F5 drift 기록 (Phase 4 재평가 trigger)**: per-ISA trimmed mean 42.64%, max 73.8% (ISA-720), min 13.5% (ISA-530). 본 수치는 **theoretical upper bound** — realized ratio = UB × P(재파싱) × P(초반 삽입) × f(삽입 개수). Phase 4 실사용 시 realized ratio 측정 후 v1.2 결정 (자동 trigger: realized_annual_cache_invalidation > 200%). prep §3.4 Phase 4 재평가 약속 실질 이행 보장. <br> • **§15a v1.2 MINOR bump Candidates 표 신설** — CP3 DEFER 5건 + Findings 재분류 일괄 가시화. F5 fallback 1순위 (연환산 > 200% 자동 trigger) + stale cleanup + Phase 4 prefix + F1/F2 v1.1.2 PATCH 선처리 기재. Phase 4 CHECKPOINT 4 의무 3-tier (재파싱 빈도 기록 / 200% trigger / 필수 섹션 — Critic cross-check §3.3 반영) 명시. <br> • **§12 JSON Schema `schema_version: {"const": "1.1.2"}`** 갱신. 추가 sync 대상 (parser-implementer 원자 커밋 처리 — Task #9 범위): `src/audit_parser/ingest/types.py JSON_SCHEMA_VERSION` / `tests/fixtures/json_schema_v1_1.schema.json` const / `scripts/validate_json.py` drift gate / `output/json/*.json` 36 파일 schema_version 문자열 전수 교체. <br> • 근거 문서: [`docs/checkpoint_3_review.md`](./checkpoint_3_review.md) (Critic cross-check 2026-04-22 PASS CONFIRMED, 5항 반영), [`docs/devils_advocate_checkpoint_3.md`](./devils_advocate_checkpoint_3.md) (Task #8 예정). |
 
 ---
 

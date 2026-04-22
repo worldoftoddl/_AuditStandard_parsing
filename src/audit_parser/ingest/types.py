@@ -21,6 +21,13 @@ v1.1.1 PATCH bump 변경점 (2026-04-21 Domain Reviewer Task #7 파생):
 - docs/json_schema.md §2.2 PATCH row 신설 파생 — `JSON_SCHEMA_VERSION` 문자열만
   "1.1" → "1.1.1". chunk_id / embedding / heading_trail_hash / paragraph_links
   등 payload 바이트 동등성 유지, 재임베딩 불필요.
+
+v1.1.2 PATCH bump 변경점 (2026-04-22 F1 rework 파생):
+- qdrant_writer per-point named vectors 전환 (chunk={passage}, summary={summary}).
+  Qdrant collection indexed_vectors_count = points_count (기존 2×) — 0-벡터 패딩
+  제거로 저장/인덱스 약 50% 절감.
+- JSON payload 바이트 동등성 유지 — chunk_id / embedding / heading_trail_hash /
+  paragraph_links 전원 불변. 재임베딩 불필요.
 """
 
 from __future__ import annotations
@@ -28,7 +35,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Final
 
-JSON_SCHEMA_VERSION: Final = "1.1.1"
+JSON_SCHEMA_VERSION: Final = "1.1.2"
 
 
 @dataclass(slots=True, frozen=True)
