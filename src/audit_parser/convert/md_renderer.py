@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Final, NamedTuple
 
 from audit_parser.ir.types import Block, BlockKind, Section
+from audit_parser.spec import ISA_SPEC, StandardSpec
 
 SCHEMA_VERSION: Final = "1.0"
 
@@ -50,9 +51,14 @@ def render_markdown(
     blocks: Iterable[Block],
     *,
     source_file: str,
+    spec: StandardSpec = ISA_SPEC,
 ) -> list[RenderResult]:
-    """Block Iterator → 기준서별 MD 파일 후보 리스트 (파일 I/O 없음)."""
-    renderer = _Renderer(source_file=source_file)
+    """Block Iterator → 기준서별 MD 파일 후보 리스트 (파일 I/O 없음).
+
+    v1.2 (Phase 4b-1): ``spec`` 주입으로 prefix-specific filename + frontmatter
+    ``standard_id`` 생성. ``ISA_SPEC`` default 로 기존 호출 경로 backward-compat.
+    """
+    renderer = _Renderer(source_file=source_file, spec=spec)
     for block in blocks:
         renderer.feed(block)
     return renderer.finalize()
@@ -63,10 +69,11 @@ def write_markdown_files(
     *,
     source_file: str,
     out_dir: Path,
+    spec: StandardSpec = ISA_SPEC,
 ) -> list[Path]:
     """render_markdown 결과를 ``out_dir`` 에 기록 후 경로 리스트 반환."""
     out_dir.mkdir(parents=True, exist_ok=True)
-    results = render_markdown(blocks, source_file=source_file)
+    results = render_markdown(blocks, source_file=source_file, spec=spec)
     written: list[Path] = []
     for result in results:
         target = out_dir / result.filename
@@ -130,10 +137,11 @@ class _FileBuffer:
 class _Renderer:
     """파일별 버퍼 + standard 전환 추적."""
 
-    __slots__ = ("_source_file", "_prelude", "_standards", "_current_standard_no")
+    __slots__ = ("_source_file", "_spec", "_prelude", "_standards", "_current_standard_no")
 
-    def __init__(self, *, source_file: str) -> None:
+    def __init__(self, *, source_file: str, spec: StandardSpec = ISA_SPEC) -> None:
         self._source_file = source_file
+        self._spec = spec
         self._prelude = _FileBuffer(standard_no=None, filename=_PRELUDE_FILENAME)
         self._prelude.set_header(_format_prelude_frontmatter(source_file))
         self._standards: dict[str, _FileBuffer] = {}
@@ -177,10 +185,12 @@ class _Renderer:
         assert no is not None
         buf = self._standards.get(no)
         if buf is None:
-            filename = f"ISA-{no}.md"
+            standard_id = self._spec.format_standard_id(no)
+            filename = f"{standard_id}.md"
             buf = _FileBuffer(standard_no=no, filename=filename)
             buf.set_header(
                 _format_standard_frontmatter(
+                    standard_id=standard_id,
                     standard_no=no,
                     standard_title=block.standard_title,
                     source_file=self._source_file,
@@ -197,14 +207,18 @@ class _Renderer:
 
 def _format_standard_frontmatter(
     *,
+    standard_id: str,
     standard_no: str,
     standard_title: str | None,
     source_file: str,
 ) -> list[str]:
+    """Phase 4b-1 v1.2: ``standard_id`` 는 ``spec.format_standard_id(standard_no)``
+    결과 그대로 주입받아 렌더. 기존 ``f'ISA-{standard_no}'`` 하드코딩 제거.
+    """
     lines = [
         "---",
         f'schema_version: "{SCHEMA_VERSION}"',
-        f'standard_id: "ISA-{standard_no}"',
+        f'standard_id: "{standard_id}"',
         f'standard_no: "{standard_no}"',
     ]
     if standard_title:

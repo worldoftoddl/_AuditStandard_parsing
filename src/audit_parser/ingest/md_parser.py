@@ -41,6 +41,7 @@ from audit_parser.ingest.types import (
     StandardRecord,
     StandardSummary,
 )
+from audit_parser.spec import ISA_SPEC, AppendixExtractor, StandardSpec
 
 # ---------------------------------------------------------------------------
 # 상수 & 정규식
@@ -220,7 +221,7 @@ def assert_chunk_id_uniqueness(chunks: Sequence[ChunkRecord]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def parse_md(md_path: Path) -> ParsedStandard | None:
+def parse_md(md_path: Path, *, spec: StandardSpec = ISA_SPEC) -> ParsedStandard | None:
     """단일 MD 파일 파싱. prelude(standard_id: null) → None 반환.
 
     v1.1: 최종 return 직전 ``assert_chunk_id_uniqueness`` 를 호출해 기준서 범위
@@ -228,6 +229,13 @@ def parse_md(md_path: Path) -> ParsedStandard | None:
     가 sha1[:8] 충돌 시에도 ``#{source_idx}`` suffix 로 해소하지만, 극히 낮은
     확률의 2-level 충돌 (동일 hash + 동일 source_idx) 을 대비해 최종 가드로
     ``ChunkIdCollisionError`` 를 발생시킨다.
+
+    v1.2 (Phase 4b-1): ``spec: StandardSpec`` 주입. ``ISA_SPEC`` default 로 기존
+    콜러 backward-compat 유지. ``spec.validate_standard_id`` 가 frontmatter 의
+    ``standard_id`` 를 해당 spec prefix alt 에 fail-fast 매칭. ``spec.appendix_extractor``
+    가 heading_trail 내부 보론 heading 을 ``(appendix_index, special_appendix_name)``
+    로 변환 (B-v2 — Critic 2026-04-22). Phase 4b-2 에서 ISQM/ASSR/FRMK spec 주입 시
+    동일 함수 시그니처 사용.
     """
     text = md_path.read_text(encoding="utf-8")
     lines = text.split("\n")
@@ -249,10 +257,14 @@ def parse_md(md_path: Path) -> ParsedStandard | None:
         return None
 
     standard = _build_standard_record(frontmatter)
+    # v1.2 — spec prefix alt 매칭 검증 (fail-fast).
+    spec.validate_standard_id(standard.standard_id)
     raw_chunks, scope_parts, definitions_parts = _parse_body(
         lines[body_start:], standard.standard_no
     )
-    chunks = tuple(_assemble_chunks(raw_chunks, standard.authority_base, standard.standard_id))
+    chunks = tuple(
+        _assemble_chunks(raw_chunks, standard.authority_base, standard.standard_id, spec=spec)
+    )
     # I1 (CP2 rework) — Phase 1 TOC boundary leak 후처리.
     chunks = tuple(c for c in chunks if not _is_toc_leak_chunk(c))
     chunks = _resolve_chunk_id_collisions(chunks)
@@ -273,15 +285,19 @@ def parse_md(md_path: Path) -> ParsedStandard | None:
     )
 
 
-def parse_md_dir(md_dir: Path) -> list[ParsedStandard]:
-    """디렉토리 전체 파싱. 00_전문.md skip, ISA-*.md 만 ISA 숫자 오름차순."""
+def parse_md_dir(md_dir: Path, *, spec: StandardSpec = ISA_SPEC) -> list[ParsedStandard]:
+    """디렉토리 전체 파싱. 00_전문.md skip, ISA-*.md 만 ISA 숫자 오름차순.
+
+    v1.2: ``spec`` 주입. default = ISA_SPEC (backward-compat). Phase 4b-2 의
+    ISQM/ASSR/FRMK 전용 디렉토리는 해당 spec 주입 필요.
+    """
     results: list[ParsedStandard] = []
     md_files = sorted(
         md_dir.glob("ISA-*.md"),
         key=lambda p: int(p.stem.split("-")[1]),
     )
     for md_path in md_files:
-        parsed = parse_md(md_path)
+        parsed = parse_md(md_path, spec=spec)
         if parsed is not None:
             results.append(parsed)
     return results
@@ -555,6 +571,8 @@ def _assemble_chunks(
     raw_chunks: Iterable[_RawChunk],
     authority_base: int,
     standard_id: str,
+    *,
+    spec: StandardSpec,
 ) -> Iterable[ChunkRecord]:
     for raw in raw_chunks:
         heading_trail = raw.heading_trail
@@ -562,7 +580,9 @@ def _assemble_chunks(
         content_markdown = "\n".join(raw.content_lines)
         paragraph_id = raw.paragraph_id if raw.paragraph_id else None
         content_text = _to_plain_text(content_markdown, paragraph_id=paragraph_id, kind=raw.kind)
-        appendix_index = _extract_appendix_index(raw.section, heading_trail)
+        appendix_index, special_appendix_name = _extract_appendix_data(
+            raw.section, heading_trail, spec.appendix_extractor
+        )
         table_cells = _extract_table_cells(raw.kind, raw.content_lines)
         # chunk_id 는 collision 미고려 preliminary 형태. _resolve_chunk_id_collisions
         # 가 F4 pair 감지 시 source_idx suffix 부착.
@@ -593,6 +613,7 @@ def _assemble_chunks(
             chunk_index=0,
             chunk_of=1,
             source_idx=raw.source_idx,
+            special_appendix_name=special_appendix_name,
             part_of=None,
             table_cells=table_cells,
         )
@@ -723,21 +744,34 @@ def _split_table_row(line: str) -> tuple[str, ...]:
 
 
 def _extract_appendix_index(section: str | None, heading_trail: Sequence[str]) -> int | None:
-    """json_schema.md §7.2/§7.2.1 — section=APPENDIX 의 ``보론 N`` 숫자 추출.
+    """Legacy shim — 기존 ISA-only 호출부가 튜플 unpack 없이 int 만 요구.
 
-    번호 없는 보론 (ISA-230/300/510/570/620/700/705/710/1100 총 9 ISA) 은 ``1``
-    으로 매핑 (§7.2.1 결정 B 채택).
+    v1.2 주입형 콜러는 ``_extract_appendix_data`` 를 직접 사용. 본 함수는
+    ISA_SPEC 기본 extractor 를 경유하여 backward-compat 을 유지한다.
+    """
+    idx, _name = _extract_appendix_data(section, heading_trail, ISA_SPEC.appendix_extractor)
+    return idx
+
+
+def _extract_appendix_data(
+    section: str | None,
+    heading_trail: Sequence[str],
+    appendix_extractor: AppendixExtractor,
+) -> tuple[int | None, str | None]:
+    """v1.2 B-v2 (Domain Reviewer 2026-04-22) — section=APPENDIX 인 경우만 호출.
+
+    ``heading_trail`` 을 역순 순회하며 ``appendix_extractor`` 가 처음으로
+    non-``(None, None)`` 튜플을 반환하는 heading 에서 멈춤. ISA/ISQM/ASSR 은
+    extractor 가 ``(N, None)`` 또는 ``(1, None)`` 반환. FRMK 만
+    un-numbered 보론 heading 에서 ``(None, <title>)`` 반환.
     """
     if section != "appendix":
-        return None
+        return None, None
     for heading in reversed(heading_trail):
-        stripped = heading.strip()
-        numbered = _APPENDIX_RE.match(stripped)
-        if numbered:
-            return int(numbered.group(1))
-        if _APPENDIX_UNNUMBERED_RE.match(stripped):
-            return 1
-    return None
+        idx, name = appendix_extractor(heading)
+        if idx is not None or name is not None:
+            return idx, name
+    return None, None
 
 
 def _build_chunk_id(
@@ -904,6 +938,7 @@ def _chunk_to_json(c: ChunkRecord) -> dict[str, object]:
         "kind": c.kind,
         "section": c.section,
         "appendix_index": c.appendix_index,
+        "special_appendix_name": c.special_appendix_name,
         "heading_trail": list(c.heading_trail),
         "heading_trail_hash": c.heading_trail_hash,
         "content_text": c.content_text,

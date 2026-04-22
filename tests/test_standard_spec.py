@@ -10,9 +10,15 @@ Scope (4b-1):
   behavior (numbered / un-numbered / non-appendix).
 * ``test_format_standard_id_*`` — composition + regex validation.
 
-Commit 3 (별도 추가): ISA 36 re-parse semantic equivalence + chunk_id bit
-equality + special_appendix_name ISA-null 검증 — md_parser / md_renderer 주입
-완료 후 hook-in.
+In-scope commit 3 additions:
+
+* ``test_isa_reparse_semantic_equivalence`` — ISA_SPEC 로 36 MD 재파싱 →
+  기존 JSON 과 ``{chunks, paragraph_links, standard, summary}`` 구조 equal
+  (embedding 필드 제외).
+* ``test_isa_chunk_id_bit_equal`` — 재파싱 chunk_id 집합 == 기존 chunk_id
+  집합 (8,590 set equality).
+* ``test_special_appendix_name_isa_default_null`` — ISA 모든 chunk 에서
+  ``special_appendix_name is None`` 확인 (36 JSON 전수).
 """
 
 from __future__ import annotations
@@ -20,15 +26,42 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from audit_parser.ingest.md_parser import parse_md, to_json_dict
 from audit_parser.ir.types import Section
 from audit_parser.spec import (
     ISA_SPEC,
     AppendixExtractor,
     isa_default_appendix_extractor,
 )
+
+REPO_ROOT = Path(__file__).parent.parent
+OUTPUT_JSON_DIR = REPO_ROOT / "output" / "json"
+OUTPUT_MD_DIR = REPO_ROOT / "output" / "md"
+
+
+# ---------------------------------------------------------------------------
+# Helpers — live-directory precondition
+# ---------------------------------------------------------------------------
+
+
+def _require_isa_output_present() -> list[Path]:
+    """Gate — 36 ISA JSON + MD 파일 양쪽 존재 확인. gitignore 대상이라
+    CI 환경에서 없을 수 있으므로 skip 우아하게 처리."""
+    json_paths = sorted(OUTPUT_JSON_DIR.glob("ISA-*.json"))
+    md_paths = sorted(OUTPUT_MD_DIR.glob("ISA-*.md"))
+    if len(json_paths) != 36 or len(md_paths) != 36:
+        pytest.skip(
+            f"output/json {len(json_paths)}/36 or output/md {len(md_paths)}/36 "
+            "not present — skipping ISA reparse equivalence gate"
+        )
+    return json_paths
+
+
+_EMBEDDING_FIELDS = frozenset({"embedding", "embedded_at", "embedding_model"})
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -289,3 +322,109 @@ def test_appendix_extractor_type_alias_is_callable() -> None:
     extractor: AppendixExtractor = ISA_SPEC.appendix_extractor
     assert callable(extractor)
     assert extractor("보론 3") == (3, None)
+
+
+# ---------------------------------------------------------------------------
+# ISA re-parse semantic equivalence (Commit 3 — Exit gate 핵심)
+# ---------------------------------------------------------------------------
+
+
+def _strip_embedding_and_summary_vectors(
+    parsed_json: dict[str, Any],
+) -> dict[str, Any]:
+    """재파싱 비교용 — embedding 필드를 JSON 구조에서 제거한 복사본 반환.
+
+    재파싱 결과는 embedding 이 전부 ``None`` 이고 기존 JSON 은 populated.
+    두 dict 를 structural equality 비교하려면 embedding 계열 필드를 양쪽에서
+    제거해야 함.
+    """
+    stripped: dict[str, Any] = {}
+    for key, value in parsed_json.items():
+        if key == "chunks" and isinstance(value, list):
+            stripped[key] = [
+                {k: v for k, v in chunk.items() if k not in _EMBEDDING_FIELDS}
+                for chunk in value
+            ]
+        elif key == "summary" and isinstance(value, dict):
+            stripped[key] = {
+                k: v for k, v in value.items() if k not in _EMBEDDING_FIELDS
+            }
+        else:
+            stripped[key] = value
+    return stripped
+
+
+def test_isa_reparse_semantic_equivalence() -> None:
+    """Exit gate #2: ISA 36 re-parse semantic 동등.
+
+    ISA_SPEC 주입형 ``parse_md`` 재실행 결과가 output/json/ISA-*.json 과
+    **embedding 계열 제외 전수 equal**. byte-level 차이는 ``schema_version``
+    값 변화 + ``special_appendix_name`` 필드 추가만 허용 — 본 테스트는 v1.2.0
+    migration 이후 실행되므로 두 쪽 모두 ``"1.2.0"`` + ``special_appendix_name``
+    를 가짐.
+    """
+    existing_paths = _require_isa_output_present()
+    for json_path in existing_paths:
+        md_path = OUTPUT_MD_DIR / (json_path.stem + ".md")
+        assert md_path.exists(), f"missing MD for {json_path.name}"
+
+        existing = json.loads(json_path.read_text(encoding="utf-8"))
+        parsed = parse_md(md_path, spec=ISA_SPEC)
+        assert parsed is not None, f"parse_md returned None for {md_path.name}"
+        reparsed = to_json_dict(parsed)
+
+        existing_stripped = _strip_embedding_and_summary_vectors(existing)
+        reparsed_stripped = _strip_embedding_and_summary_vectors(reparsed)
+
+        assert existing_stripped == reparsed_stripped, (
+            f"{json_path.name}: semantic equivalence failed. "
+            f"existing keys={sorted(existing_stripped)} vs "
+            f"reparsed keys={sorted(reparsed_stripped)}"
+        )
+
+
+def test_isa_chunk_id_bit_equal() -> None:
+    """Exit gate #3: 재파싱 chunk_id 집합 == 기존 chunk_id 집합 (8,590 set)."""
+    existing_paths = _require_isa_output_present()
+    existing_chunk_ids: set[str] = set()
+    reparsed_chunk_ids: set[str] = set()
+    for json_path in existing_paths:
+        md_path = OUTPUT_MD_DIR / (json_path.stem + ".md")
+        existing = json.loads(json_path.read_text(encoding="utf-8"))
+        for c in existing["chunks"]:
+            existing_chunk_ids.add(c["chunk_id"])
+        parsed = parse_md(md_path, spec=ISA_SPEC)
+        assert parsed is not None
+        for c in parsed.chunks:
+            reparsed_chunk_ids.add(c.chunk_id)
+
+    assert len(existing_chunk_ids) == 8590, (
+        f"existing chunk_id set size {len(existing_chunk_ids)} != 8590 "
+        f"(Phase 3 F1 v1.1.2 실측값)"
+    )
+    assert existing_chunk_ids == reparsed_chunk_ids, (
+        f"chunk_id set mismatch — only in existing: "
+        f"{sorted(existing_chunk_ids - reparsed_chunk_ids)[:5]}... "
+        f"only in reparsed: {sorted(reparsed_chunk_ids - existing_chunk_ids)[:5]}..."
+    )
+
+
+def test_special_appendix_name_isa_default_null() -> None:
+    """B-v2 불변조건: ISA 36 JSON 의 모든 chunk 에서
+    ``special_appendix_name`` 필드가 존재하고 값은 ``None``.
+
+    FRMK 만 non-null — 해당 spec 은 Phase 4b-2 에서 추가.
+    """
+    existing_paths = _require_isa_output_present()
+    for json_path in existing_paths:
+        data = json.loads(json_path.read_text(encoding="utf-8"))
+        for c in data["chunks"]:
+            assert "special_appendix_name" in c, (
+                f"{json_path.name} chunk {c['chunk_id']!r} "
+                f"missing special_appendix_name field"
+            )
+            assert c["special_appendix_name"] is None, (
+                f"{json_path.name} chunk {c['chunk_id']!r} "
+                f"special_appendix_name expected None, got "
+                f"{c['special_appendix_name']!r} — ISA must always be None (B-v2)"
+            )
