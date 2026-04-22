@@ -1,0 +1,269 @@
+{
+  "generated_at": "2026-04-22T10:00:00Z",
+  "source_script": "tmp/phase4_deepscan.py + tmp/phase4_isqm_table.py",
+  "generator": "audit-standard-domain-reviewer (team audit-parser-phase4)",
+  "purpose": "Phase 4a Scout 산출물. Phase 4b parser-implementer + numbering/structure/spec 테스트 fixture + CHECKPOINT 4 회귀 가드.",
+  "schema_version_target": "1.2.0",
+  "_comment_schema": "tests/test_standard_spec.py / test_numbering_phase4.py / test_isqm_table_parser.py 에서 로드. 각 target 에 대해 counts/boundaries/patterns/samples 를 assertion 으로 사용.",
+
+  "fallback_extension": {
+    "description": "Phase 4 classify_kind spec-aware override + prelude skip 통합 설계 (docs/checkpoint_4_prep.md §2.2.2 '참조용 초안, 즉시 구현 금지' 반영).",
+    "added_patterns": [
+      {
+        "lvl_text": "(%1)",
+        "num_fmts": ["decimal", "lowerLetter", "lowerRoman"],
+        "ilvl": 0,
+        "applies_to_specs": ["ASSR", "FRMK"],
+        "new_kind": "paragraph_body",
+        "paragraph_id_preservation": "(1) / (a) / (i) 원본 보존",
+        "rationale": "parser-implementer Issue 1 대안 (c) — SUB_ITEM semantic 왜곡 회피, JSON Schema 불변"
+      },
+      {
+        "lvl_text": "%1.",
+        "num_fmts": ["upperRoman"],
+        "ilvl": 0,
+        "applies_to_specs": ["ASSR", "FRMK"],
+        "new_kind": null,
+        "action": "prelude_skip",
+        "rationale": "parser-implementer Issue 2 — 개정개요 prelude 는 meta/prelude 성격. StandardSpec.prelude_end_marker 로 chunk 생성 이전 skip"
+      }
+    ],
+    "expected_unknown_pct_after": {
+      "ISA": "0% (회귀 영향 0 — parser-implementer DM Issue 3 실측)",
+      "ISQM-1": "≤ 0.5% (body parser 가 numbering.xml 경로를 우회 — unknown 원천 없음)",
+      "ASSR-3000": "≤ 0.5% (221 PARAGRAPH_BODY + 4 prelude skip)",
+      "FRMK-1": "≤ 0.5% (84 PARAGRAPH_BODY + 4 prelude skip)"
+    },
+    "measured_unknown_pct_after": {
+      "ISA": null,
+      "ISQM-1": null,
+      "ASSR-3000": null,
+      "FRMK-1": null,
+      "note": "Phase 4b-3 parser-implementer 가 spec-aware 구현 후 3-tier gate 판정 시 채움"
+    },
+    "_3tier_gate_rule": "ABORT if unknown ≥ 5%; WARNING if unknown > 0.5% OR count > 20; PASS otherwise (see docs/checkpoint_4_prep.md §0.2.2)"
+  },
+
+  "targets": {
+    "ISQM-1": {
+      "file": "raw/3. 품질관리기준서1(2018년 제정)_국어전문.docx",
+      "file_size_bytes": 88871,
+      "standard_id": "ISQM-1",
+      "standard_no": "1",
+      "collection": "audit_standards_품질관리기준서_2018",
+      "parsing_difficulty": "HIGH",
+      "profile_doc": "docs/isqm_structure_profile.md",
+
+      "counts": {
+        "total_paragraphs_corpus": 884,
+        "paragraphs_body_level": 3,
+        "paragraphs_in_tables": 881,
+        "tables_total": 3,
+        "numbered_paragraphs_direct": 130,
+        "abstract_nums": 30,
+        "num_ids": 30,
+        "heading_1_count": 0,
+        "heading_2_count": 0,
+        "heading_3_count": 0
+      },
+
+      "tables": [
+        {"index": 0, "rows": 3, "cols": 3, "role": "title_page", "action": "skip"},
+        {"index": 1, "rows": 244, "cols": 1, "role": "toc", "action": "skip"},
+        {"index": 2, "rows": 236, "cols": 2, "role": "body", "action": "parse_as_isqm_table", "parser": "ISQMTableBodyParser"}
+      ],
+
+      "body_parser_rules": {
+        "mode": "2-column table cell extraction",
+        "col0_role": "paragraph_id_text",
+        "col1_role": "body_content",
+        "paragraph_id_formats": ["numeric (e.g. '1', '2', ..., '57')", "Korean prefix (e.g. '한4-1', '한18-1', '한25-1')"],
+        "section_heading_detection": "row with col[0]='' AND col[1] matches ISQM_SECTIONS set",
+        "subsection_heading_detection": "row with col[0]='' AND col[1] matches ISQM_SUBSECTIONS set (not in sections)",
+        "sub_item_in_cell": "col[1] <w:p>[1:] — text prefix regex ^\\s*\\(([a-z]{1,2}|[가-힣]|[ivx]{1,4}|\\d{1,2})\\)\\s*",
+        "empty_row_action": "skip (layout filler)"
+      },
+
+      "isqm_sections_set": [
+        "서론",
+        "시행일",
+        "목적",
+        "용어의 정의",
+        "요구사항",
+        "적용 및 기타 설명자료"
+      ],
+
+      "isqm_subsections_under_requirements": [
+        "관련 요구사항의 적용과 준수",
+        "품질관리시스템의 구성요소",
+        "회계법인내 품질에 대한 리더십 책임",
+        "관련 윤리적 요구사항",
+        "독립성",
+        "의뢰인 관계 및 특정 업무의 수용과 유지",
+        "인적 자원",
+        "업무팀의 배정",
+        "업무의 수행",
+        "모니터링"
+      ],
+
+      "sample_rows": [
+        {"row": 0, "col0": "1", "col1_first_style": "NumberedParagraph1", "col1_text_prefix": "이 품질관리기준서는 재무제표 감사와 검토, 그리고 기타 인증 및 관련 서비스 업무의 수행을 위한", "expected_kind": "requirement", "expected_paragraph_id": "1"},
+        {"row": 3, "col0": "", "col1_first_style": "NumberedParagraph1", "col1_text": "이 품질관리기준서의 효력", "expected_action": "subsection_heading_intro"},
+        {"row": 5, "col0": "한4-1", "col1_first_style": "NumberedParagraph1", "expected_kind": "requirement", "expected_paragraph_id": "한4-1", "_note": "KICPA 국내 추가 문단"},
+        {"row": 11, "col0": "", "col1_first_style": "NumberedParagraph1", "col1_text": "시행일", "expected_action": "section_heading", "expected_current_section": "effective_date"},
+        {"row": 15, "col0": "11", "col1_multi_paragraph": true, "expected_kind": "requirement", "expected_paragraph_id": "11", "expected_sub_items": ["(a)", "(b)", "..."]}
+      ]
+    },
+
+    "ASSR-3000": {
+      "file": "raw/역사적 재무정보에 대한 감사 및 검토 이외의 인증업무기준(2022년 개정)_전문(개정개요 포함).docx",
+      "file_size_bytes": 383178,
+      "standard_id": "ASSR-3000",
+      "standard_no": "3000",
+      "collection": "audit_standards_기타인증업무기준_2022",
+      "parsing_difficulty": "MED",
+      "profile_doc": "docs/assurance_other_structure_profile.md",
+
+      "counts": {
+        "total_paragraphs_corpus": 1957,
+        "paragraphs_body_level": 86,
+        "paragraphs_in_tables": 1871,
+        "tables_total": 12,
+        "numbered_paragraphs_direct": 567,
+        "abstract_nums": 115,
+        "num_ids": 115,
+        "heading_1_count": 0,
+        "heading_2_count": 0,
+        "heading_3_count": 0
+      },
+
+      "prelude_skip": {
+        "range_paragraphs": "0..274 (inclusive)",
+        "end_marker": {"type": "container+text", "container": "tbl[427x2]", "text": "서론"},
+        "covered_content": ["title_page", "개요", "개정 배경", "개정 기준서의 주요 내용", "주요 개정 이슈"],
+        "_note": "team-lead 결정 (2026-04-22): 개정개요는 meta/preface 성격 → skip. parser-implementer Issue 2 반영."
+      },
+
+      "section_boundaries_in_tbl_427x2": [
+        {"idx": 275, "text": "서론", "section": "intro", "phase": "body_primary"},
+        {"idx": 322, "text": "시행일", "section": "effective_date", "phase": "body_primary"},
+        {"idx": 327, "text": "목적", "section": "purpose", "phase": "body_primary"},
+        {"idx": 338, "text": "용어의 정의", "section": "definitions", "phase": "body_primary"},
+        {"idx": 382, "text": "요구사항", "section": "requirements", "phase": "body_primary"},
+        {"idx": 480, "text": "품질관리", "section": "requirements", "phase": "body_primary", "_note": "requirements 내부 sub-section"},
+        {"idx": 814, "text": "목적", "section": "application", "phase": "body_application", "_state_transition": "requirements → application"},
+        {"idx": 821, "text": "용어의 정의", "section": "application", "phase": "body_application"},
+        {"idx": 1162, "text": "품질관리", "section": "application", "phase": "body_application"}
+      ],
+
+      "numbering_patterns_classified": {
+        "requirement_%1._decimal": 45,
+        "paragraph_body_(%1)_ilvl0": 221,
+        "bullet": 260,
+        "sub_item_ilvl>=1": 37,
+        "prelude_skip_upperRoman": 4
+      },
+
+      "sample_content_references": {
+        "ISAE_3000_mentions": 10,
+        "품질관리기준서_1_cross_refs": 16,
+        "_note": "KICPA 번역본 은 IAASB ISAE 3000 (Revised) 가 bash. Phase 5 ISAE 3400/3410 등 통합 여지는 regex ASSR-\\d{3,4}$ 에서 수용."
+      }
+    },
+
+    "FRMK-1": {
+      "file": "raw/인증업무개념체계(2022년 개정)_전문.docx",
+      "file_size_bytes": 347306,
+      "standard_id": "FRMK-1",
+      "standard_no": "1",
+      "collection": "audit_standards_인증업무개념체계_2022",
+      "parsing_difficulty": "LOW",
+      "profile_doc": "docs/framework_structure_profile.md",
+
+      "counts": {
+        "total_paragraphs_corpus": 794,
+        "paragraphs_body_level": 52,
+        "paragraphs_in_tables": 742,
+        "tables_total": 14,
+        "numbered_paragraphs_direct": 204,
+        "abstract_nums": 54,
+        "num_ids": 54,
+        "heading_1_count": 0,
+        "heading_2_count": 21,
+        "heading_3_count": 0
+      },
+
+      "prelude_skip": {
+        "range_paragraphs": "0..131 (inclusive)",
+        "end_marker": {"type": "heading_2_text", "text": "문단번호"},
+        "covered_content": ["title_page", "개정 배경", "주요 개정 내용", "주요 개정 이슈", "서론 prelude heading"],
+        "_note": "team-lead 결정 (2026-04-22): 개정개요 skip. 'heading 2 == \"문단번호\"' 이후 본문 시작."
+      },
+
+      "heading_2_sections": [
+        {"idx": 132, "text": "문단번호", "action": "skip_column_header"},
+        {"idx": 133, "text": "서론1-4",                         "section": "intro",                               "range": "1-4"},
+        {"idx": 134, "text": "윤리 원칙과 품질관리기준5-9",          "section": "ethical_requirements_and_quality",  "range": "5-9"},
+        {"idx": 135, "text": "인증업무의 의의10-11",               "section": "assurance_definition",              "range": "10-11"},
+        {"idx": 136, "text": "입증업무와 직접업무12-13",             "section": "attestation_vs_direct",             "range": "12-13"},
+        {"idx": 137, "text": "합리적 확신업무와 제한적 확신업무14-16", "section": "reasonable_vs_limited_assurance",   "range": "14-16"},
+        {"idx": 138, "text": "개념체계의 범위17-19",                "section": "framework_scope",                   "range": "17-19"},
+        {"idx": 139, "text": "비인증업무보고서20-21",                "section": "non_assurance_reports",             "range": "20-21"},
+        {"idx": 140, "text": "인증업무의 전제조건22-25",             "section": "assurance_preconditions",           "range": "22-25"},
+        {"idx": 141, "text": "인증업무의 구성 요소26",               "section": "assurance_components",              "range": "26"},
+        {"idx": 142, "text": "삼자관계27-38",                     "section": "three_party_relationship",          "range": "27-38"},
+        {"idx": 143, "text": "기초인증대상39-41",                  "section": "underlying_subject_matter",         "range": "39-41"},
+        {"idx": 144, "text": "준거기준42-49",                     "section": "criteria",                          "range": "42-49"},
+        {"idx": 145, "text": "증거50-82",                        "section": "evidence",                          "range": "50-82"},
+        {"idx": 146, "text": "인증보고서83-92",                   "section": "assurance_report",                  "range": "83-92"},
+        {"idx": 147, "text": "기타 사항93-95",                    "section": "other_matters",                     "range": "93-95"},
+        {"idx": 148, "text": "인증인 명칭의 부적절한 사용96",        "section": "inappropriate_use_of_name",         "range": "96"},
+        {"idx": 149, "text": "보론: 역할과 책임",                  "section": "appendix", "appendix_index": null, "special_appendix_name": "역할과 책임", "_note": "un-numbered — Critic §4.2 대안 B-v2 채택 (2026-04-22 재합의): ISA §7.2.1 불변 유지 + FRMK 전용 신규 필드 special_appendix_name 로 title 보존. 초기 초안 (appendix_index=0) 철회."},
+        {"idx": 150, "text": "보론 1: 회계감사기준위원회가 제정한 기준 등의 상호 관계 및 공인회계사윤리기준과의 관계", "section": "appendix", "appendix_index": 1, "special_appendix_name": null},
+        {"idx": 151, "text": "보론 2: 입증업무와 직접업무",          "section": "appendix", "appendix_index": 2, "special_appendix_name": null},
+        {"idx": 152, "text": "보론 3: 인증업무의 당사자",           "section": "appendix", "appendix_index": 3, "special_appendix_name": null}
+      ],
+
+      "heading_range_strip_regex": "(\\d+(?:-\\d+)?)\\s*$",
+      "heading_range_strip_rule": "보론 prefix 로 시작 시 strip 비활성화 (보론 1 의 1 은 appendix_index)",
+
+      "numbering_patterns_classified": {
+        "requirement_%1._decimal": 23,
+        "paragraph_body_(%1)_ilvl0": 84,
+        "bullet": 81,
+        "sub_item_ilvl>=1": 12,
+        "prelude_skip_upperRoman": 4
+      }
+    }
+  },
+
+  "standard_id_backward_compat_test_cases": {
+    "_purpose": "tests/test_standard_spec.py::test_standard_id_backward_compat 의 parametrize 데이터. docs/checkpoint_4_prep.md §1.3.4 최종 매칭 사례표 전수 이관.",
+    "cases": [
+      {"input": "ISA-200", "match": true, "alt": "ISA"},
+      {"input": "ISA-450", "match": true, "alt": "ISA"},
+      {"input": "ISA-500", "match": true, "alt": "ISA"},
+      {"input": "ISA-720", "match": true, "alt": "ISA"},
+      {"input": "ISA-1100", "match": true, "alt": "ISA"},
+      {"input": "ISA-1200", "match": true, "alt": "ISA"},
+      {"input": "ISA-99", "match": false, "_reason": "3-digit minimum"},
+      {"input": "ISA-12345", "match": false, "_reason": "4-digit maximum"},
+      {"input": "ISA-1", "match": false, "_reason": "same"},
+      {"input": "ISA-220R", "match": false, "_reason": "revised suffix scope out — v1.3 MINOR bump if needed"},
+      {"input": "ISQM-1", "match": true, "alt": "ISQM"},
+      {"input": "ISQM-2", "match": true, "alt": "ISQM"},
+      {"input": "ISQM-10", "match": true, "alt": "ISQM", "_note": "Critic α / implementer A.2 확장 — Phase 5 여유"},
+      {"input": "ISQM-99", "match": true, "alt": "ISQM"},
+      {"input": "ISQM-100", "match": false, "_reason": "3-digit scope out — v1.3"},
+      {"input": "ASSR-3000", "match": true, "alt": "ASSR"},
+      {"input": "ASSR-3410", "match": true, "alt": "ASSR"},
+      {"input": "ASSR-99999", "match": false, "_reason": "5-digit out of bounds"},
+      {"input": "FRMK-1", "match": true, "alt": "FRMK"},
+      {"input": "FRMK-2", "match": true, "alt": "FRMK"},
+      {"input": "FRMK", "match": false, "_reason": "number required — implementer A3 convention {PREFIX}-{N}"},
+      {"input": "ISA", "match": false, "_reason": "prefix-only false-positive 거부 — Critic (2)"},
+      {"input": "ISQM", "match": false, "_reason": "same"},
+      {"input": "ASSR", "match": false, "_reason": "same"}
+    ]
+  }
+}
