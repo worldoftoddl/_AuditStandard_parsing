@@ -38,6 +38,19 @@ HARD_LIMIT: Final = 4000  # Upstage Solar passage API 상한 (monitoring 용)
 _ATOMIC_KINDS: Final = frozenset({"block_quote", "unknown_numbering"})
 _LIST_KINDS: Final = frozenset({"bullet", "sub_item"})
 
+# Critic β-1 (docs/checkpoint_4_prep.md §1.8) — chunk_id suffix chain
+# 최대 2-level: F4 collision ``#source_idx`` (Pass 2) + split ``#chunk_index``
+# (Pass 3). 재분할 (이미 Pass 3 를 거쳐 chunk_of > 1 인 chunk 를 Pass 3 재
+# 호출) 은 3-level suffix 를 유발하므로 금지 — 분할 스킵 + warning 로그 →
+# Domain Reviewer 수동 개입.
+#
+# 판정 기준은 **chunk metadata (chunk_of > 1)** — chunk_id 문자열 파싱은
+# fallback ``{kind}#{source_idx}`` 의 natural ``#`` 와 suffix chain 의 ``#`` 를
+# 구분 불가 (예: ``table#1669#2237`` 은 legitimate Pass 2 결과, ``table#1669#2237#1``
+# 은 3-level). metadata 기반은 semantic 직접 검증이라 false-positive 없음.
+# md_parser 가 split 을 1회만 호출하므로 현 시점 trigger 가능성 0 — future-safe
+# (Phase 4b-2 ISQMTable/ASSR 2차 split 경로 확장 시 자동 발동).
+
 # 한국어 + 영문 문장 종결 패턴. 문장부호 뒤 공백/개행을 경계로 split.
 _SENTENCE_BOUNDARY_RE: Final = re.compile(r"(?<=[.!?。!?])\s+|(?<=[다요]\.)\s+|(?<=까\?)\s+")
 
@@ -83,6 +96,20 @@ def split_oversized_chunks(
     out: list[ChunkRecord] = []
     for c in chunks:
         if c.token_estimate <= soft_limit:
+            out.append(c)
+            continue
+        # Critic β-1 (Phase 4b-1 §1.8) — 재분할 대상 chunk 가 이미 Pass 3 를
+        # 거친 split 결과 (chunk_of > 1) 라면 추가 split 은 3-level suffix chain
+        # 을 유발하므로 분할 금지 + 경고 로그 → manual intervention.
+        if c.chunk_of > 1:
+            print(
+                f"[chunk_splitter] 2-level suffix guard: standard={standard_id} "
+                f"chunk={c.chunk_id} kind={c.kind} tokens={c.token_estimate} "
+                f"(> {soft_limit}, chunk_of={c.chunk_of} — 이미 split 완료, "
+                f"3-level split 금지 — Critic β-1 / "
+                f"docs/checkpoint_4_prep.md §1.8). Domain Reviewer 수동 개입.",
+                file=sys.stderr,
+            )
             out.append(c)
             continue
         if c.kind in _ATOMIC_KINDS:

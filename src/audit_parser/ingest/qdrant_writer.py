@@ -116,6 +116,52 @@ class QdrantWriterError(Exception):
     """qdrant_writer 계열 기본 예외."""
 
 
+def _assert_isa_baseline_vector(
+    collection: str, slot: str, vparams: VectorParams
+) -> None:
+    """Single named-vector slot baseline check (Phase 4b-1 stub)."""
+    if int(vparams.size) != EMBED_DIM:
+        raise SchemaDriftError(
+            f"{collection}.{slot}: vector size {vparams.size} != baseline {EMBED_DIM}"
+        )
+    if vparams.distance != Distance.COSINE:
+        raise SchemaDriftError(
+            f"{collection}.{slot}: distance {vparams.distance} != Distance.COSINE"
+        )
+    # HNSW config per-vector. None = inherit collection default — Phase 4b-1
+    # stub 는 named 값만 검증.
+    if vparams.hnsw_config is None:
+        return
+    if vparams.hnsw_config.m != HNSW_M:
+        raise SchemaDriftError(
+            f"{collection}.{slot}: HNSW m={vparams.hnsw_config.m} != {HNSW_M}"
+        )
+    if vparams.hnsw_config.ef_construct != HNSW_EF_CONSTRUCT:
+        raise SchemaDriftError(
+            f"{collection}.{slot}: HNSW ef_construct="
+            f"{vparams.hnsw_config.ef_construct} != {HNSW_EF_CONSTRUCT}"
+        )
+
+
+class IngestIncompleteError(QdrantWriterError):
+    """Critic y (2026-04-22) — post-upsert count < expected 불일치.
+
+    Phase 4e 에서 3 collection 각각 `expected_points (source-of-truth JSON) vs
+    actual_points (Qdrant client.count)` 대조 시 발동. Phase 4b-1 에서는 signature
+    reservation + stub 만 — 실 count 비교 로직은 Phase 4e 본 구현.
+    """
+
+
+class SchemaDriftError(QdrantWriterError):
+    """Critic z (2026-04-22) — collection 의 HNSW / vector dim / distance /
+    payload index 가 spec 기대값과 불일치.
+
+    Phase 4b-1 stub 은 ISA baseline (named vectors passage+summary / 4096d /
+    cosine / HNSW m=16 ef=200) 하드코딩 검증. Phase 4b-2 에서 spec.qdrant_config()
+    주입형으로 일반화. mismatch 발견 시 caller 에 ``--force`` 옵션으로 재생성 안내.
+    """
+
+
 class QdrantWriteError(QdrantWriterError):
     """Batch 업서트 재시도 소진 실패."""
 
@@ -361,6 +407,80 @@ class QdrantWriter:
     def count(self, name: str = COLLECTION_DEFAULT) -> int:
         result = self._client.count(collection_name=name, exact=True)
         return int(result.count)
+
+    def verify_collection_baseline(
+        self,
+        name: str = COLLECTION_DEFAULT,
+        *,
+        expected_points: int | None = None,
+    ) -> dict[str, object]:
+        """Phase 4b-1 stub (Critic y/z 합의) — ISA baseline invariant 검증.
+
+        Checks (raises on mismatch):
+
+        * Collection 존재 (``collection_exists``).
+        * Named vectors ``{passage, summary}`` 모두 present, each 4096d
+          cosine (``EMBED_DIM`` / ``Distance.COSINE``).
+        * HNSW ``m == HNSW_M (16)``, ``ef_construct == HNSW_EF_CONSTRUCT (200)``
+          (named vector scope — collection-level HNSW 가 named vector 별로
+          지정됨).
+        * ``expected_points`` 지정 시 ``actual == expected`` (Phase 4e invariant
+          assertion pattern 의 stub 버전).
+
+        Phase 4b-2 가 본 메서드를 spec-driven 으로 일반화 (``spec.qdrant_config()``
+        주입) — 현 stub 은 ISA baseline (``HNSW_M/EF_CONSTRUCT/EMBED_DIM``) 모듈
+        상수 고정. Phase 4e 에서 ``ingest_collection_with_verification`` 에 편입.
+
+        Args:
+            name: Qdrant collection 이름.
+            expected_points: Optional — pre-count from ``output/json/*.json``.
+                None 이면 count 검증 skip (schema 만 확인).
+
+        Returns:
+            dict with keys ``{"points_count", "passage_config", "summary_config"}`` —
+            caller 가 검증 결과 기록 용 (EMBED_METRICS.json 확장).
+
+        Raises:
+            SchemaDriftError: collection 없음 / named vector 누락 / dim /
+                distance / HNSW 불일치.
+            IngestIncompleteError: ``expected_points`` 와 actual 불일치.
+        """
+        if not self._client.collection_exists(name):
+            raise SchemaDriftError(f"collection {name!r} does not exist")
+
+        info = self._client.get_collection(name)
+        vectors_config = info.config.params.vectors
+        # vectors_config 은 dict[name, VectorParams] — named vectors.
+        if not isinstance(vectors_config, dict):
+            raise SchemaDriftError(
+                f"{name}: expected named vectors dict, got {type(vectors_config).__name__}"
+            )
+        if set(vectors_config) != {VECTOR_PASSAGE, VECTOR_SUMMARY}:
+            raise SchemaDriftError(
+                f"{name}: named vectors mismatch — expected "
+                f"{{'{VECTOR_PASSAGE}', '{VECTOR_SUMMARY}'}}, got {sorted(vectors_config)}"
+            )
+
+        for slot in (VECTOR_PASSAGE, VECTOR_SUMMARY):
+            _assert_isa_baseline_vector(name, slot, vectors_config[slot])
+
+        actual_points = self.count(name)
+        if expected_points is not None and actual_points != expected_points:
+            raise IngestIncompleteError(
+                f"{name}: expected {expected_points} points, got {actual_points}"
+            )
+
+        return {
+            "points_count": actual_points,
+            "passage_config": {
+                "size": int(vectors_config[VECTOR_PASSAGE].size),
+                "distance": str(vectors_config[VECTOR_PASSAGE].distance),
+            },
+            "summary_config": {
+                "size": int(vectors_config[VECTOR_SUMMARY].size),
+                "distance": str(vectors_config[VECTOR_SUMMARY].distance),
+            },
+        }
 
     def _ensure_indexes(self, name: str) -> None:
         for field_name in _KEYWORD_INDEXES:
@@ -609,10 +729,12 @@ __all__ = [
     "KIND_STANDARD_SUMMARY",
     "VECTOR_PASSAGE",
     "VECTOR_SUMMARY",
+    "IngestIncompleteError",
     "QdrantWriteError",
     "QdrantWriter",
     "QdrantWriterConfig",
     "QdrantWriterError",
+    "SchemaDriftError",
     "UpsertResult",
     "chunk_id_to_point_id",
 ]

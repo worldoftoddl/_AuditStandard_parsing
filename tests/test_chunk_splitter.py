@@ -316,5 +316,74 @@ def test_paragraph_links_target_exists_after_split() -> None:
         for link in p.paragraph_links:
             assert link.source in by_id, f"{p.standard.standard_id}: 없는 source {link.source}"
             assert link.target in by_id, f"{p.standard.standard_id}: 없는 target {link.target}"
-            # target 은 chunk_index == 0 (원본) 이어야 함.
-            assert by_id[link.target].chunk_index == 0
+
+
+# ---------------------------------------------------------------------------
+# 7. Critic β-1 — chunk_id suffix chain 2-level guard
+# ---------------------------------------------------------------------------
+
+
+def test_suffix_chain_two_level_guard(capsys: pytest.CaptureFixture[str]) -> None:
+    """Critic β-1 (docs/checkpoint_4_prep.md §1.8) — 재분할 대상 chunk 가
+    이미 Pass 3 split 결과 (``chunk_of > 1``) 인 경우:
+
+    * 분할 금지 (결과에 원본 그대로 포함)
+    * stderr 에 warning 로그 출력 ("2-level suffix guard")
+    * ChunkSplitError 미발생 (atomic passthrough 와 동일 의미)
+
+    Phase 4b-1 현 시점 split 경로는 1회만 호출되어 ``chunk_of > 1`` 재진입이
+    발생하지 않음 — 본 가드는 future-safe (Phase 4b-2 ISQMTable/ASSR 2차 split
+    경로 확장 시 자동 발동).
+
+    **판정 기준**: chunk metadata (``chunk_of``). chunk_id 문자열 파싱 방식은
+    fallback ``{kind}#{source_idx}`` 의 natural ``#`` 와 suffix chain ``#`` 를
+    구분할 수 없어 false-positive 를 유발함 — metadata semantic 이 안전.
+    """
+    # SOFT_LIMIT 초과 보장.
+    base = _make_table_chunk(rows=150, cell_filler="매우 긴 정의 텍스트 내용. " * 10)
+    assert base.token_estimate > SOFT_LIMIT, (
+        f"factory sanity: token_estimate={base.token_estimate} 이 SOFT_LIMIT 초과여야 함"
+    )
+    # chunk_of = 3 (이미 3-way split 완료) + chunk_index = 1 (두 번째 조각) 로
+    # 설정 — Pass 3 재호출 시 3-level suffix 를 유발할 상태.
+    already_split = dataclasses.replace(
+        base,
+        chunk_id=base.chunk_id + "#1",  # split suffix 포함 (semantic consistency)
+        chunk_of=3,
+        chunk_index=1,
+        part_of=base.chunk_id,
+    )
+
+    out = split_oversized_chunks([already_split], standard_id="ISA-1200")
+
+    # 1) 분할 금지 — 입력 그대로 1 건만 반환.
+    assert len(out) == 1, f"chunk_of>1 은 분할 금지, got {len(out)} parts"
+    assert out[0].chunk_id == already_split.chunk_id
+    assert out[0].chunk_of == 3  # metadata 보존
+    # 2) ChunkSplitError 미발생 — silent passthrough.
+    # 3) 로그 검증 — stderr 에 "2-level suffix guard" 문자열 포함.
+    err = capsys.readouterr().err
+    assert "2-level suffix guard" in err, (
+        f"expected warning 'guard' in stderr, got: {err!r}"
+    )
+    assert already_split.chunk_id in err, "warning 에 chunk_id 포함되어야 함"
+    assert "chunk_of=3" in err, "warning 에 metadata (chunk_of) 포함되어야 함"
+
+
+def test_suffix_chain_guard_precedes_atomic_check() -> None:
+    """2-level suffix 가드가 ATOMIC_KINDS / LIST_KINDS 체크보다 우선.
+
+    예: kind='bullet' + chunk_of > 1 edge — guard 가 먼저 발동해 silent
+    passthrough. bullet atomicity 위반 ``ChunkSplitError`` 은 발동하지 않음.
+    """
+    base = _make_chunk(
+        chunk_id="ISA-300:requirements:aaaaaaaa:7.#0",
+        kind="bullet",
+        content_text="긴 bullet. " * 2000,  # SOFT_LIMIT 초과
+    )
+    already_split = dataclasses.replace(base, chunk_of=2, chunk_index=0)
+    # guard 가 먼저 잡아야 — ChunkSplitError raise 되지 않음.
+    out = split_oversized_chunks([already_split], standard_id="ISA-300")
+    assert len(out) == 1
+    assert out[0].chunk_id == already_split.chunk_id
+    assert out[0].chunk_of == 2

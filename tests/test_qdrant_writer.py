@@ -37,11 +37,15 @@ from audit_parser.ingest.embedder import EMBED_DIM, EmbeddingResult
 from audit_parser.ingest.qdrant_writer import (
     _QDRANT_POINT_NAMESPACE,
     COLLECTION_DEFAULT,
+    HNSW_EF_CONSTRUCT,
+    HNSW_M,
     KIND_STANDARD_SUMMARY,
     VECTOR_PASSAGE,
     VECTOR_SUMMARY,
+    IngestIncompleteError,
     QdrantWriter,
     QdrantWriterConfig,
+    SchemaDriftError,
     chunk_id_to_point_id,
 )
 from audit_parser.ingest.types import (
@@ -530,3 +534,54 @@ def test_per_point_named_vectors(
 def test_collection_default_name() -> None:
     """CLAUDE.md §5 — 기본 collection 이름 회귀."""
     assert COLLECTION_DEFAULT == "audit_standards_회계감사기준_2025"
+
+
+# ---------------------------------------------------------------------------
+# Phase 4b-1 Commit 4 — verify_collection_baseline stub (Critic y/z 합의)
+# ---------------------------------------------------------------------------
+
+
+def test_verify_collection_baseline_passes_for_fresh_collection(
+    writer: QdrantWriter, temp_collection: str
+) -> None:
+    """ensure_collection 직후 즉시 verify — passage/summary 4096d cosine +
+    HNSW m=16/ef=200 baseline 일치. expected_points 미지정 시 count 검증 skip."""
+    writer.ensure_collection(temp_collection)
+    result = writer.verify_collection_baseline(temp_collection)
+    assert result["points_count"] == 0  # fresh collection
+    passage_cfg = result["passage_config"]
+    assert isinstance(passage_cfg, dict)
+    assert passage_cfg["size"] == EMBED_DIM
+    assert "cosine" in str(passage_cfg["distance"]).lower()
+    summary_cfg = result["summary_config"]
+    assert isinstance(summary_cfg, dict)
+    assert summary_cfg["size"] == EMBED_DIM
+
+
+def test_verify_collection_baseline_raises_on_missing_collection(
+    writer: QdrantWriter,
+) -> None:
+    """미존재 collection 은 SchemaDriftError."""
+    fake_name = f"__test_qw_missing_{uuid.uuid4().hex[:8]}__"
+    with pytest.raises(SchemaDriftError, match="does not exist"):
+        writer.verify_collection_baseline(fake_name)
+
+
+def test_verify_collection_baseline_expected_points_mismatch(
+    writer: QdrantWriter, temp_collection: str
+) -> None:
+    """expected_points 지정 시 actual count 와 불일치면 IngestIncompleteError."""
+    writer.ensure_collection(temp_collection)
+    # fresh collection 은 0 points — expected=5 주면 불일치.
+    with pytest.raises(IngestIncompleteError, match="expected 5 points, got 0"):
+        writer.verify_collection_baseline(temp_collection, expected_points=5)
+
+
+def test_verify_baseline_constants_match_phase3_spec() -> None:
+    """HNSW_M / HNSW_EF_CONSTRUCT / EMBED_DIM module 상수가 Phase 3 실측치와
+    일치하는지 (phase_4_plan v2 §6.4 '기존 collection 유지' 전제)."""
+    assert HNSW_M == 16, f"Phase 3 baseline HNSW_M=16, got {HNSW_M}"
+    assert HNSW_EF_CONSTRUCT == 200, (
+        f"Phase 3 baseline HNSW_EF_CONSTRUCT=200, got {HNSW_EF_CONSTRUCT}"
+    )
+    assert EMBED_DIM == 4096, f"Upstage Solar baseline dim=4096, got {EMBED_DIM}"
