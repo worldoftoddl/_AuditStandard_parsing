@@ -1,19 +1,19 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://audit-parser.local/schema/v1.1.2.json",
-  "title": "AuditStandard ParsedStandard v1.1.2",
+  "$id": "https://audit-parser.local/schema/v1.2.0.json",
+  "title": "AuditStandard ParsedStandard v1.2.0",
   "type": "object",
   "required": ["schema_version", "standard", "summary", "chunks", "paragraph_links"],
   "additionalProperties": false,
   "properties": {
-    "schema_version": {"const": "1.1.2"},
+    "schema_version": {"const": "1.2.0"},
     "standard": {
       "type": "object",
       "required": ["standard_id", "standard_no", "standard_title", "source_file", "authority_base"],
       "additionalProperties": false,
       "properties": {
-        "standard_id": {"type": "string", "pattern": "^ISA-\\d{3,4}$"},
-        "standard_no": {"type": "string", "pattern": "^\\d{3,4}$"},
+        "standard_id": {"type": "string", "pattern": "^(ISA-\\d{3,4}|ISQM-\\d{1,2}|ASSR-\\d{3,4}|FRMK-\\d)$"},
+        "standard_no": {"type": "string", "pattern": "^\\d{1,4}$"},
         "standard_title": {"type": "string"},
         "source_file": {"type": "string"},
         "authority_base": {"type": "integer", "enum": [0, 1]}
@@ -48,6 +48,7 @@
         "type": "object",
         "required": [
           "chunk_id", "paragraph_id", "kind", "section", "appendix_index",
+          "special_appendix_name",
           "heading_trail", "heading_trail_hash",
           "content_text", "content_markdown",
           "authority", "parent_paragraph_id", "is_application_guidance",
@@ -78,6 +79,7 @@
             ]
           },
           "appendix_index": {"type": ["integer", "null"], "minimum": 1},
+          "special_appendix_name": {"type": ["string", "null"]},
           "heading_trail": {"type": "array", "items": {"type": "string"}},
           "heading_trail_hash": {"type": "string", "pattern": "^[0-9a-f]{8}$"},
           "content_text": {"type": "string"},

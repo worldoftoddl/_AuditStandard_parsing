@@ -246,7 +246,7 @@ def test_ingest_dir_produces_valid_json_with_v1_1_schema(tmp_path: Path) -> None
     )
     assert result.exit_code == 0, result.output
     data = json.loads((json_dir / "ISA-200.json").read_text(encoding="utf-8"))
-    assert data["schema_version"] == "1.1.2"
+    assert data["schema_version"] == "1.2.0"
     assert data["standard"]["standard_no"] == "200"
     assert data["standard"]["standard_id"] == "ISA-200"
     assert isinstance(data["chunks"], list)

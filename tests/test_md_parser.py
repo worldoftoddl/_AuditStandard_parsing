@@ -54,7 +54,7 @@ from audit_parser.ingest.types import JSON_SCHEMA_VERSION, ChunkRecord
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MD_DIR = REPO_ROOT / "output" / "md"
-SCHEMA_PATH = REPO_ROOT / "tests" / "fixtures" / "json_schema_v1_1.schema.json"
+SCHEMA_PATH = REPO_ROOT / "tests" / "fixtures" / "json_schema_v1_2.schema.json"
 
 
 @pytest.fixture(scope="session")
@@ -86,7 +86,7 @@ def test_frontmatter_basic(tmp_path: Path) -> None:
     f.write_text(md, encoding="utf-8")
     p = parse_md(f)
     assert p is not None
-    assert p.schema_version == JSON_SCHEMA_VERSION == "1.1.2"
+    assert p.schema_version == JSON_SCHEMA_VERSION == "1.2.0"
     assert p.standard.standard_id == "ISA-200"
     assert p.standard.standard_no == "200"
     assert p.standard.standard_title == '제"목" with \\backslash'
