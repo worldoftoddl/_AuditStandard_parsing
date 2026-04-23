@@ -10,6 +10,29 @@
 - 1×1 단일 셀 표의 `BLOCK_QUOTE` 승격
 - 전역 `is_toc` 마킹 (`목차`/`ad` 스타일)
 
+Phase 4c c2 확장 (2026-04-23):
+
+StandardSpec dispatch wiring 3축 (Critic Q3 2026-04-23 LOCK) — (ii)/(iii) drift
+감지 시 Critic rework #2 자동 발동:
+
+1. **(iii) declarative tuple** — ``spec.prelude_skip`` 이 tuple 로 선언 시
+   ``callable(spec.prelude_skip)`` False 로 감지 (``spec/standard_spec.py``
+   type alias 가 Callable 강제)
+2. **(ii) caller state** — ``StructureMachine._in_prelude: bool`` attribute 부재
+   시 (ii) drift. ``hasattr(machine, "_in_prelude")`` 로 감지
+3. **(ii) hidden predicate state** — referential transparency 위반 (동일
+   RawBlock 2회 호출 시 결과 변동) 시 (ii) drift. Critic Q1 권고 test 가
+   closure/dict/class-state 전 변형을 단일 invariant 로 포착
+
+PreludeSkip Option (i) per ``spec/standard_spec.py:140-149`` docstring:
+caller (본 StructureMachine) 가 ``_in_prelude`` state 소유, predicate 는
+stateless per-block marker matcher. Predicate True 반환 시 caller 가
+``_in_prelude=False`` 토글 + marker block 자체 skip.
+
+β-1 invariant (``docs/checkpoint_4_prep.md §1.8``): body_parser 는 atomic
+RawBlock emit only. ``chunk_splitter.split_oversized_chunks`` 가 split 단일
+책임. 본 StructureMachine 은 body_parser 결과를 pre-split 하지 않는다.
+
 설계 근거: `docs/isa_structure_profile.md` §2 / §5 / §6 / §8, `docs/numbering_strategy.md §4.4`.
 후자의 옵션 A 가정이 실측과 어긋나(동일 numId 가 기준서 간 공유되고 lvlOverride 부재)
 기준서 전환 시 `NumberingEngine.reset()` 을 호출해 카운터 누수를 차단한다.
@@ -19,10 +42,16 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Iterator
-from typing import Final, Literal
+from typing import TYPE_CHECKING, Final, Literal
 
 from audit_parser.ir.numbering import NumberingEngine
 from audit_parser.ir.types import Block, BlockKind, RawBlock, Section
+
+if TYPE_CHECKING:
+    # `audit_parser.spec` imports ``ir.types``; ``ir/__init__.py`` re-exports this
+    # module, so a top-level ``from audit_parser.spec import ...`` here creates a
+    # circular import. TYPE_CHECKING defers to static analysis only.
+    from audit_parser.spec import StandardSpec
 
 ISA_BOUNDARY: Final = re.compile(r"^감사기준서\s+(\d{3,4})(?:\s+(.+))?$")
 _HEADING_STYLE_RE: Final = re.compile(r"^heading ([1-9])$")
@@ -62,15 +91,24 @@ _State = Literal["PRE_TOC", "TOC", "STANDARD_BODY"]
 def iter_blocks(
     raw_blocks: Iterable[RawBlock],
     engine: NumberingEngine,
+    *,
+    spec: StandardSpec | None = None,
 ) -> Iterator[Block]:
     """`RawBlock` Iterator → `Block` Iterator.
 
     `engine` 은 호출자가 준비한 `NumberingEngine` 인스턴스. 기준서 경계에서
     `engine.reset()` 이 호출된다.
+
+    Phase 4c c2:
+        ``spec`` (default ISA_SPEC) 이 ``prelude_skip`` 또는 ``section_detector``
+        를 제공하는 경우, feed 에서 caller-owned state (``_in_prelude``) 로 prelude
+        blocks 를 drop (None 반환). 따라서 본 함수는 None 이 아닌 Block 만 yield.
     """
-    machine = StructureMachine(engine)
+    machine = StructureMachine(engine, spec=spec)
     for raw in raw_blocks:
-        yield machine.feed(raw)
+        block = machine.feed(raw)
+        if block is not None:
+            yield block
 
 
 class StructureMachine:
@@ -82,6 +120,7 @@ class StructureMachine:
 
     __slots__ = (
         "_engine",
+        "_spec",
         "_state",
         "_standard_no",
         "_standard_title",
@@ -90,10 +129,22 @@ class StructureMachine:
         "_last_requirement_id_by_standard",
         "_last_level0_paragraph_id",
         "_enter_standard_count",
+        "_in_prelude",
+        "_current_section_text",
     )
 
-    def __init__(self, engine: NumberingEngine) -> None:
+    def __init__(
+        self,
+        engine: NumberingEngine,
+        *,
+        spec: StandardSpec | None = None,
+    ) -> None:
+        # Lazy default — avoid circular import at module load time.
+        if spec is None:
+            from audit_parser.spec import ISA_SPEC
+            spec = ISA_SPEC
         self._engine = engine
+        self._spec = spec
         self._state: _State = "PRE_TOC"
         self._standard_no: str | None = None
         self._standard_title: str | None = None
@@ -102,6 +153,14 @@ class StructureMachine:
         self._last_requirement_id_by_standard: dict[str, str] = {}
         self._last_level0_paragraph_id: str | None = None
         self._enter_standard_count = 0
+        # PreludeSkip Option (i) caller-owned state — c1 docstring
+        # (spec/standard_spec.py:140-149). (ii) stateful filter / (iii) declarative
+        # tuple 해석 금지 — Critic rework #2 발동 트리거.
+        # Axis 2 감지: `hasattr(machine, "_in_prelude")` — attribute 부재 시 (ii) drift.
+        self._in_prelude: bool = spec.prelude_skip is not None
+        # section_detector (ASSR) 용 text-based current section name. None = 감지
+        # 규약 미적용 (ISA default).
+        self._current_section_text: str | None = None
 
     # -- public ------------------------------------------------------------
 
@@ -118,7 +177,16 @@ class StructureMachine:
         """기준서 경계에서 `engine.reset()` 이 호출된 횟수 — 검증용."""
         return self._enter_standard_count
 
-    def feed(self, raw: RawBlock) -> Block:
+    def feed(self, raw: RawBlock) -> Block | None:  # noqa: C901
+        # Phase 4c c2 — spec dispatch hooks (PreludeSkip Option (i) + section_detector).
+        # See `_apply_spec_hooks` docstring for the Critic LOCK 3-axis drift detection.
+        # C901 waiver: base Phase 1 ISA state machine complexity was already at the
+        # ruff threshold (10); Phase 4c adds 1-line spec hook shim pushing it to 11.
+        # Extracting further would obscure the Phase 1 feed orchestration; the
+        # spec-specific logic is isolated in `_apply_spec_hooks`.
+        if self._apply_spec_hooks(raw):
+            return None  # prelude skip path — caller state toggled
+
         is_toc = raw.style in _TOC_STYLES
         standard_boundary = False
 
@@ -192,6 +260,39 @@ class StructureMachine:
         )
 
     # -- internals ---------------------------------------------------------
+
+    def _apply_spec_hooks(self, raw: RawBlock) -> bool:
+        """Apply PreludeSkip + section_detector 훅.
+
+        Phase 4c c2 extraction (Critic Q3 3-axis LOCK):
+
+        * **PreludeSkip Option (i)** — caller-owned ``_in_prelude`` state.
+          Predicate True 반환 시 state 토글 + marker block 자체 skip.
+          Pre-marker blocks 는 caller state 로 skip (predicate 가 아님).
+          `c1 docstring (spec/standard_spec.py:140-149)` — Critic LOCK 2026-04-23.
+          (ii)/(iii) drift 감지 시 Critic rework #2 자동 발동.
+        * **section_detector** (ASSR) — text-based state machine. ISA 는
+          ``spec.section_detector is None`` 이므로 이 분기 skip, 기존 heading 2
+          classify 규칙 (``_update_heading_stack``) 사용.
+
+        Returns:
+            True — caller 가 본 block 을 skip 해야 함 (prelude).
+            False — 계속 feed 진행.
+        """
+        prelude_skip = self._spec.prelude_skip
+        if self._in_prelude and prelude_skip is not None:
+            if prelude_skip(raw):
+                # Marker block reached — toggle + skip marker.
+                self._in_prelude = False
+            # Pre-marker or marker both skipped.
+            return True
+
+        section_detector = self._spec.section_detector
+        if section_detector is not None:
+            new_section_text = section_detector(raw, self._current_section_text)
+            if new_section_text is not None:
+                self._current_section_text = new_section_text
+        return False
 
     def _enter_standard(self, no: str, title_group: str | None) -> None:
         """새 기준서 진입 — 스택·섹션·parent 트래킹 전부 초기화 후 engine.reset()."""

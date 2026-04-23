@@ -193,15 +193,21 @@ def test_isqm_body_parser_emits_atomic_rawblocks_without_chunk_of_leak() -> None
 # ---------------------------------------------------------------------------
 
 
-def test_iter_body_default_spec_is_isa() -> None:
-    """iter_body(docx_path) default spec 이 ISA_SPEC — Phase 1 경로 backward-compat."""
+def test_iter_body_default_spec_resolves_to_isa() -> None:
+    """iter_body(docx_path) default spec 이 None → lazy resolve 시 ISA_SPEC.
+
+    Circular import 회피를 위해 signature default 는 ``None``, 함수 진입 시점
+    ``from audit_parser.spec import ISA_SPEC`` 로 lazy resolve. ISA path backward-
+    compat 는 c1 regression test (`test_iter_block_level_default_no_recurse_*`)
+    + ISA 36 JSON byte-equiv test 로 보증.
+    """
     import inspect
 
     from audit_parser.ir.docx_reader import iter_body
 
     sig = inspect.signature(iter_body)
     spec_param = sig.parameters["spec"]
-    assert spec_param.default is ISA_SPEC
+    assert spec_param.default is None
 
 
 # ---------------------------------------------------------------------------
@@ -215,3 +221,231 @@ def _local_tag(elem: etree._Element) -> str:
     if not isinstance(tag, str):
         return ""
     return tag.rsplit("}", 1)[-1]
+
+
+# ---------------------------------------------------------------------------
+# c2 — PreludeSkip Option (i) 3축 drift detection
+# ---------------------------------------------------------------------------
+
+
+def test_prelude_skip_caller_state_toggle_variant_isqm() -> None:
+    """PreludeSkip Option (i) — ISQM variant.
+
+    ISQM_SPEC 는 body_parser 를 통해 table-level dispatch 를 하므로 prelude_skip
+    은 None. StructureMachine 초기화 시 `_in_prelude=False` 예상.
+    """
+    from audit_parser.ir.numbering import NumberingEngine
+    from audit_parser.ir.structure import StructureMachine
+
+    machine = StructureMachine(NumberingEngine({}, {}), spec=ISQM_SPEC)
+    # ISQM_SPEC.prelude_skip is None → caller state 는 False 로 초기화
+    assert machine._in_prelude is False
+
+
+def test_prelude_skip_caller_state_toggle_variant_assr_frmk() -> None:
+    """PreludeSkip Option (i) — ASSR + FRMK variants.
+
+    ASSR_SPEC / FRMK_SPEC 은 prelude_skip 을 제공 → caller `_in_prelude=True`
+    초기값 + marker block 통해 toggle 정상 동작 검증.
+
+    Critic rework #2 trigger guard — (ii) stateful filter / (iii) declarative
+    tuple 해석 drift 시 이 test fail.
+    """
+    from audit_parser.ir.numbering import NumberingEngine
+    from audit_parser.ir.structure import StructureMachine
+    from audit_parser.ir.types import BlockKind
+    from audit_parser.spec import ASSR_SPEC, FRMK_SPEC
+
+    # ASSR — marker = "서론" text
+    assr_machine = StructureMachine(NumberingEngine({}, {}), spec=ASSR_SPEC)
+    assert assr_machine._in_prelude is True
+    # Pre-marker block (random content): predicate False → skip via caller state
+    pre_block = RawBlock(
+        idx=0, kind=BlockKind.PARAGRAPH_BODY, text="개정 배경",
+        style="", num_id=None, ilvl=None,
+    )
+    assert assr_machine.feed(pre_block) is None
+    assert assr_machine._in_prelude is True  # state preserved
+    # Marker block: predicate True → toggle + skip marker
+    marker = RawBlock(
+        idx=1, kind=BlockKind.PARAGRAPH_BODY, text="서론",
+        style="", num_id=None, ilvl=None,
+    )
+    assert assr_machine.feed(marker) is None
+    assert assr_machine._in_prelude is False  # toggled
+
+    # FRMK — marker = heading 2 + text startswith "문단번호"
+    frmk_machine = StructureMachine(NumberingEngine({}, {}), spec=FRMK_SPEC)
+    assert frmk_machine._in_prelude is True
+    pre_frmk = RawBlock(
+        idx=0, kind=BlockKind.PARAGRAPH_BODY, text="개정 배경",
+        style="", num_id=None, ilvl=None,
+    )
+    assert frmk_machine.feed(pre_frmk) is None
+    assert frmk_machine._in_prelude is True
+    marker_frmk = RawBlock(
+        idx=1, kind=BlockKind.HEADING, text="문단번호",
+        style="heading 2", num_id=None, ilvl=None,
+    )
+    assert frmk_machine.feed(marker_frmk) is None
+    assert frmk_machine._in_prelude is False
+
+
+def test_prelude_skip_predicate_is_referentially_transparent() -> None:
+    """Critic Q1 2026-04-23 LOCK — (ii) hidden state drift 결정적 invariant.
+
+    동일 RawBlock 2회 호출 시 동일 결과. 변동 = hidden state = (ii) drift.
+    closure / dict / class-state 전 변형을 단일 assertion 으로 포착.
+    """
+    from audit_parser.ir.types import BlockKind
+    from audit_parser.spec import ASSR_SPEC, FRMK_SPEC
+
+    # ASSR — "서론" marker
+    if ASSR_SPEC.prelude_skip is not None:
+        marker = RawBlock(
+            idx=0, kind=BlockKind.PARAGRAPH_BODY, text="서론",
+            style="", num_id=None, ilvl=None,
+        )
+        first = ASSR_SPEC.prelude_skip(marker)
+        second = ASSR_SPEC.prelude_skip(marker)
+        assert first == second, (
+            f"ASSR prelude_skip 가 동일 block 에 대해 {first} → {second} 변동 — "
+            f"hidden predicate state = (ii) drift (Critic rework #2 trigger)"
+        )
+
+    # FRMK — heading 2 "문단번호" marker
+    if FRMK_SPEC.prelude_skip is not None:
+        marker_frmk = RawBlock(
+            idx=0, kind=BlockKind.HEADING, text="문단번호",
+            style="heading 2", num_id=None, ilvl=None,
+        )
+        first_frmk = FRMK_SPEC.prelude_skip(marker_frmk)
+        second_frmk = FRMK_SPEC.prelude_skip(marker_frmk)
+        assert first_frmk == second_frmk
+
+
+def test_structure_machine_exposes_in_prelude_attribute() -> None:
+    """Critic Q3 2026-04-23 LOCK — 3축 중 axis 2 (caller state) 감지.
+
+    `hasattr(machine, "_in_prelude")` attribute 부재 시 (ii) drift. 본 test 는
+    StructureMachine 이 `_in_prelude` slot 을 유지하고 있음을 보증. Slot rename
+    시 (예: `_prelude_state` 로 변경) 이 test fail → Critic rework #2 trigger.
+    """
+    from audit_parser.ir.numbering import NumberingEngine
+    from audit_parser.ir.structure import StructureMachine
+    from audit_parser.spec import ASSR_SPEC, FRMK_SPEC
+
+    for spec in (ASSR_SPEC, FRMK_SPEC, ISQM_SPEC, ISA_SPEC):
+        machine = StructureMachine(NumberingEngine({}, {}), spec=spec)
+        assert hasattr(machine, "_in_prelude"), (
+            f"{spec.prefix} StructureMachine missing _in_prelude — (ii) drift "
+            f"(Critic rework #2 trigger)"
+        )
+
+
+def test_spec_prelude_skip_is_callable_when_provided() -> None:
+    """Critic Q3 axis 1 (iii) declarative tuple drift 감지.
+
+    `spec.prelude_skip` 이 callable (non-tuple) 여야 함. tuple 로 declarative
+    marker 를 선언하면 `callable(...)` False → rework #2 trigger.
+    """
+    from audit_parser.spec import ASSR_SPEC, FRMK_SPEC
+
+    for spec in (ASSR_SPEC, FRMK_SPEC):
+        if spec.prelude_skip is not None:
+            assert callable(spec.prelude_skip), (
+                f"{spec.prefix} prelude_skip is not callable — (iii) drift "
+                f"(Critic rework #2 trigger)"
+            )
+
+
+# ---------------------------------------------------------------------------
+# c2 — FRMK normalize_framework_heading wiring (heading 2 한정)
+# ---------------------------------------------------------------------------
+
+
+def test_frmk_render_heading_2_normalizes_range_suffix() -> None:
+    """Critic #X3 — heading 2 에서 range suffix strip + HTML 주석 보존.
+
+    Phase 4d forward-contract (Domain Reviewer Check 2):
+    - cleaned text ``"서론"`` 이 display 에 나옴
+    - range ``"1-4"`` 는 HTML 주석 ``<!-- range: 1-4 -->`` 로 보존
+    """
+    from audit_parser.convert.md_renderer import _render_heading
+    from audit_parser.ir.types import Block, BlockKind
+    from audit_parser.spec import FRMK_SPEC
+
+    block = Block(
+        idx=10, kind=BlockKind.HEADING, text="서론1-4",
+        style="heading 2",
+        paragraph_id=None, is_application_guidance=False,
+        parent_paragraph_id=None, standard_no="1", standard_title="인증업무개념체계",
+        section=None, heading_trail=(), immediate_heading=None,
+    )
+    lines = _render_heading(block, prev_section=None, spec=FRMK_SPEC)
+    # line 0 = heading display. cleaned "서론" — range 제거.
+    assert lines[0] == "## 서론"
+    # line 1 = HTML comment. "range: 1-4" 포함.
+    assert "range: 1-4" in lines[1]
+    # range suffix 가 display line 에 leak 되지 않음.
+    assert "1-4" not in lines[0]
+
+
+def test_frmk_render_heading_1_does_not_normalize_year_suffix() -> None:
+    """Critic #X3 핵심 — heading 1 의 연도 suffix silent strip 방지.
+
+    ``"인증업무개념체계 2022"`` (heading 1 title) 는 연도가 strip 되면 안 됨.
+    heading 2 한정 normalize 가 엄격 작동하는지 검증.
+    """
+    from audit_parser.convert.md_renderer import _render_heading
+    from audit_parser.ir.types import Block, BlockKind
+    from audit_parser.spec import FRMK_SPEC
+
+    block = Block(
+        idx=0, kind=BlockKind.HEADING, text="인증업무개념체계 2022",
+        style="heading 1",
+        paragraph_id=None, is_application_guidance=False,
+        parent_paragraph_id=None, standard_no=None, standard_title=None,
+        section=None, heading_trail=(), immediate_heading=None,
+    )
+    lines = _render_heading(block, prev_section=None, spec=FRMK_SPEC)
+    # heading 1 이므로 normalize 미적용 — 연도 2022 유지
+    assert lines[0] == "# 인증업무개념체계 2022"
+    assert "2022" in lines[0]
+    # HTML comment 에 range 필드 없음 (range_suffix is None)
+    assert "range:" not in lines[1]
+
+
+def test_non_frmk_render_heading_skips_normalization() -> None:
+    """ISA/ISQM/ASSR spec 에서는 normalize 미적용 — 기존 heading 동작 유지."""
+    from audit_parser.convert.md_renderer import _render_heading
+    from audit_parser.ir.types import Block, BlockKind
+    from audit_parser.spec import ASSR_SPEC
+
+    block = Block(
+        idx=5, kind=BlockKind.HEADING, text="서론1-4",
+        style="heading 2",
+        paragraph_id=None, is_application_guidance=False,
+        parent_paragraph_id=None, standard_no="3000", standard_title=None,
+        section=None, heading_trail=(), immediate_heading=None,
+    )
+    lines = _render_heading(block, prev_section=None, spec=ASSR_SPEC)
+    # ASSR spec 에서는 normalize 미적용 — raw text 그대로
+    assert lines[0] == "## 서론1-4"
+    assert "range:" not in lines[1]
+
+
+# ---------------------------------------------------------------------------
+# c2 — md_parser auto-dispatch
+# ---------------------------------------------------------------------------
+
+
+def test_parse_md_default_spec_is_none_for_auto_dispatch() -> None:
+    """parse_md(path) default spec=None → frontmatter 기반 auto-dispatch."""
+    import inspect
+
+    from audit_parser.ingest.md_parser import parse_md
+
+    sig = inspect.signature(parse_md)
+    spec_param = sig.parameters["spec"]
+    assert spec_param.default is None

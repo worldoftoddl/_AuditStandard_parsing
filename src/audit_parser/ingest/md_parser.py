@@ -221,7 +221,11 @@ def assert_chunk_id_uniqueness(chunks: Sequence[ChunkRecord]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def parse_md(md_path: Path, *, spec: StandardSpec = ISA_SPEC) -> ParsedStandard | None:
+def parse_md(
+    md_path: Path,
+    *,
+    spec: StandardSpec | None = None,
+) -> ParsedStandard | None:
     """단일 MD 파일 파싱. prelude(standard_id: null) → None 반환.
 
     v1.1: 최종 return 직전 ``assert_chunk_id_uniqueness`` 를 호출해 기준서 범위
@@ -234,8 +238,14 @@ def parse_md(md_path: Path, *, spec: StandardSpec = ISA_SPEC) -> ParsedStandard 
     콜러 backward-compat 유지. ``spec.validate_standard_id`` 가 frontmatter 의
     ``standard_id`` 를 해당 spec prefix alt 에 fail-fast 매칭. ``spec.appendix_extractor``
     가 heading_trail 내부 보론 heading 을 ``(appendix_index, special_appendix_name)``
-    로 변환 (B-v2 — Critic 2026-04-22). Phase 4b-2 에서 ISQM/ASSR/FRMK spec 주입 시
-    동일 함수 시그니처 사용.
+    로 변환 (B-v2 — Critic 2026-04-22).
+
+    v1.2 (Phase 4c c2): ``spec=None`` default 채택 — frontmatter ``standard_id``
+    prefix 로 ``get_spec_for_standard_id`` 자동 dispatch. ISA backward-compat:
+    frontmatter standard_id 가 ``ISA-*`` 이면 ISA_SPEC 이 자연 선택되므로 기존
+    36 ISA JSON 바이트 동등 보장. Explicit ``spec=ISA_SPEC`` / ``spec=ISQM_SPEC``
+    override 도 여전히 허용 (테스트용 / prelude 00_전문.md 의 standard_id=null
+    처리용).
     """
     text = md_path.read_text(encoding="utf-8")
     lines = text.split("\n")
@@ -257,7 +267,15 @@ def parse_md(md_path: Path, *, spec: StandardSpec = ISA_SPEC) -> ParsedStandard 
         return None
 
     standard = _build_standard_record(frontmatter)
-    # v1.2 — spec prefix alt 매칭 검증 (fail-fast).
+    # v1.2 (c2) — spec auto-dispatch when not explicitly provided. Uses frontmatter
+    # standard_id prefix → SPEC_REGISTRY lookup. Explicit ``spec=ISA_SPEC`` caller
+    # override still honoured (backward-compat + test injection).
+    if spec is None:
+        from audit_parser.spec import get_spec_for_standard_id
+        spec = get_spec_for_standard_id(standard.standard_id)
+    # v1.2 — spec prefix alt 매칭 검증 (fail-fast). Auto-dispatched spec 은 이미
+    # ``get_spec_for_standard_id`` 내부에서 validate 되었으나 explicit override 는
+    # 여전히 prefix 불일치 가능 — 2중 guard.
     spec.validate_standard_id(standard.standard_id)
     raw_chunks, scope_parts, definitions_parts = _parse_body(
         lines[body_start:], standard.standard_no

@@ -30,14 +30,20 @@ from __future__ import annotations
 import zipfile
 from collections.abc import Iterable, Iterator
 from pathlib import Path
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from lxml import etree
 
 from audit_parser.ir._xml import safe_parse
 from audit_parser.ir.styles import StyleIndex, parse_styles_xml, resolve_paragraph_numPr
 from audit_parser.ir.types import BlockKind, RawBlock
-from audit_parser.spec import ISA_SPEC, StandardSpec
+
+if TYPE_CHECKING:
+    # `audit_parser.spec` imports ``ir.types``; ``ir/__init__.py`` re-exports
+    # ``ir.docx_reader``, so a top-level ``from audit_parser.spec import ...`` here
+    # creates a circular import. TYPE_CHECKING defers the import to static analysis
+    # only. Runtime default is resolved lazily inside `iter_body` via local import.
+    from audit_parser.spec import StandardSpec
 
 _W_NS: Final = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 _NSMAP: Final[dict[str, str]] = {"w": _W_NS}
@@ -92,7 +98,7 @@ def open_docx_zip(docx_path: Path) -> zipfile.ZipFile:
 def iter_body(
     docx_path: Path,
     *,
-    spec: StandardSpec = ISA_SPEC,
+    spec: StandardSpec | None = None,
 ) -> Iterator[RawBlock]:
     """DOCX body 를 순회하며 `RawBlock` 을 yield.
 
@@ -122,6 +128,13 @@ def iter_body(
         emit only. split 책임은 ``chunk_splitter.split_oversized_chunks`` 독점. 본
         함수는 body_parser 결과를 pre-split 하지 않음.
     """
+    # Lazy default — avoid circular import at module load time. ``audit_parser.spec``
+    # imports ``ir.types``; ``ir/__init__.py`` re-exports this module, so top-level
+    # ``from audit_parser.spec import ISA_SPEC`` would cycle.
+    if spec is None:
+        from audit_parser.spec import ISA_SPEC
+        spec = ISA_SPEC
+
     with open_docx_zip(docx_path) as zf:
         style_index = _load_style_index(zf)
         with zf.open("word/document.xml") as stream:
@@ -136,7 +149,8 @@ def iter_body(
     # spec is ISA_SPEC: use recurse=False to preserve exact Phase 1 iteration order.
     # non-ISA: recurse=True descends into wrapper tables (FRMK tbl[3x3] / ASSR
     # tbl[427x2]) — inner <w:p> yielded at top-level.
-    recurse = spec is not ISA_SPEC
+    from audit_parser.spec import ISA_SPEC as _ISA_SPEC  # local — avoid cycle
+    recurse = spec is not _ISA_SPEC
     body_parser = spec.body_parser
     for child in _iter_block_level(body, recurse=recurse):
         # body_parser dispatch — atomic RawBlock emission, no chunk_of tampering.

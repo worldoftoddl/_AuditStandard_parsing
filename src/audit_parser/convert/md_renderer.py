@@ -153,7 +153,7 @@ class _Renderer:
         prev_section = buffer.observe_section(block.section)
 
         if block.kind == BlockKind.HEADING:
-            lines = _render_heading(block, prev_section)
+            lines = _render_heading(block, prev_section, spec=self._spec)
         elif block.kind == BlockKind.TOC_ENTRY:
             lines = _render_toc_entry(block)
         elif block.kind == BlockKind.TABLE:
@@ -250,10 +250,42 @@ def _escape_yaml_string(s: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _render_heading(block: Block, prev_section: Section | None) -> list[str]:
+def _render_heading(
+    block: Block,
+    prev_section: Section | None,
+    *,
+    spec: StandardSpec = ISA_SPEC,
+) -> list[str]:
+    """Render a HEADING block to Markdown ``### text`` + metadata comment.
+
+    Phase 4c c2 — FRMK `heading_range_strip` wiring (Domain Reviewer Check 2 /
+    Critic verbal note #X3):
+
+    * FRMK heading 2 (e.g. ``"서론1-4"`` or ``"삼자관계27-38"``) 는
+      :func:`normalize_framework_heading` 으로 cleaning — display 에는 cleaned
+      text (``"서론"``) + HTML 주석 ``<!-- range: 1-4 -->`` 로 range suffix 보존.
+    * **heading 2 한정** (Critic #X3) — heading 1 (e.g. ``"인증업무개념체계 2022"``
+      title) 의 연도 suffix 는 silent strip 방지 위해 normalize 적용 금지.
+    * Non-FRMK spec (ISA/ISQM/ASSR) 은 이 분기 skip → 기존 동작 그대로.
+
+    Phase 4d forward-contract (Domain Reviewer Check 2, 2026-04-23 LOCK):
+        * MD 출력 pattern: ``### 서론`` + ``<!-- range: 1-4 -->`` HTML 주석
+        * Phase 4d md_parser 가 HTML 주석 parse 하여 range metadata 복원 (또는
+          별도 payload field 로 이관)
+        * heading_trail canonical form = cleaned text ``("서론",)`` (range-free)
+        * heading_trail_hash = sha1("서론") 기반
+        * 대안 (``structure.py`` wiring) rejected 근거: RawBlock.text 원본 손실
+          + ISA 경로 복잡도 증가 (Domain Reviewer Check 2 내부 분석)
+    """
     level = _heading_level(block.style)
     hashes = "#" * level
-    line = f"{hashes} {block.text}"
+    # Phase 4c c2 — FRMK heading 2 normalize (Critic #X3 heading 2 한정).
+    display_text = block.text
+    range_suffix: str | None = None
+    if spec.prefix == "FRMK" and level == 2:
+        from audit_parser.spec.frmk_spec import normalize_framework_heading
+        display_text, range_suffix = normalize_framework_heading(block.text)
+    line = f"{hashes} {display_text}"
     comment_parts: list[str] = []
     # 섹션 전이 or 보론 heading (APPENDIX 영역의 heading 은 매번 재표기). 후자는
     # F5 대응: 동일 기준서 내 `보론 1`, `보론 2` 가 연속 등장해도 각 heading 마다
@@ -264,6 +296,9 @@ def _render_heading(block: Block, prev_section: Section | None) -> list[str]:
     if emit_section:
         assert block.section is not None
         comment_parts.append(f"section: {block.section.value}")
+    if range_suffix is not None:
+        # FRMK-specific range metadata — Phase 4d md_parser 가 복원.
+        comment_parts.append(f"range: {range_suffix}")
     comment_parts.append(f"idx: {block.idx}")
     comment = "<!-- " + " | ".join(comment_parts) + " -->"
     return [line, comment]
