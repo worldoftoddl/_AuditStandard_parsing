@@ -129,28 +129,183 @@ def parse_isqm_body_table(tbl_elem, *, numbering_engine) -> Iterable[RawBlock]:
 
 ### 2.4 실측 Section 목록 (body table 내부)
 
-`tmp/phase4_deepscan.py` + row-by-row 실측 결과:
+`tmp/phase4_deepscan.py` + row-by-row 실측 (Phase 4a) + **Phase 4c c3 실 convert WARNING 로그 수집 (N=143 → canonical 46)** 통합 실측 결과.
+Phase 4c c4 (`2c8446b`) 에서 `ISQM_SUBSECTIONS` frozenset 46 entries + `ISQM_TABLE_HEADERS` 신설 + `_strip_reference_suffix` canonical match 규약 반영 완료 (`src/audit_parser/spec/isqm_spec.py`). 본 §2.4 는 Phase 4c c5 (`docs-only`) 에서 도메인 rationale 문서화로 동기 bump.
 
-| idx (body table row 기준 approx.) | section heading text | 해석 / section enum |
+#### 2.4.1 Primary sections (6 entries — `ISQM_SECTIONS`)
+
+| section enum | heading text | 해석 |
 |---|---|---|
-| 0 | (implicit) | `intro` (서론 구간 진입 — idx=65 근처 "서론" heading 이전) |
-| — | `서론` (idx=65 in flat order) | `intro` |
-| 8 | `이 품질관리기준서의 효력` | `intro` sub-section |
-| 11 | `시행일` | `effective_date` |
-| — | `목적` | `purpose` |
-| — | `용어의 정의` | `definitions` |
-| — | `요구사항` | `requirements` |
-| 21 | `관련 요구사항의 적용과 준수` | `requirements` sub-section |
-| 25 | `품질관리시스템의 구성요소` | `requirements` sub-section |
-| 28 | `회계법인내 품질에 대한 리더십 책임` | `requirements` sub-section |
-| 32 | `관련 윤리적 요구사항` | `requirements` sub-section |
-| 34 | `독립성` | `requirements` sub-sub (under 관련 윤리적 요구사항) |
-| 41 | `의뢰인 관계 및 특정 업무의 수용과 유지` | `requirements` sub-section |
-| 45 | `인적 자원` | `requirements` sub-section |
-| 47 | `업무팀의 배정` | `requirements` sub-sub |
-| — | `업무의 수행` | `requirements` sub-section |
-| — | `모니터링` | `requirements` sub-section |
-| — | `적용 및 기타 설명자료` | `application` |
+| `intro` | `서론` | 이 품질관리기준서의 범위 / 효력 포함 (idx=65 in flat order) |
+| `effective_date` | `시행일` | (idx=11 body table row) |
+| `purpose` | `목적` | |
+| `definitions` | `용어의 정의` | |
+| `requirements` | `요구사항` | 리더십 / 윤리 / 인적 자원 / 의뢰인 관계 / 업무수행 / 모니터링 등 하위 |
+| `application` | `적용 및 기타 설명자료` | 각 요구사항의 적용지침 |
+
+#### 2.4.2 Sub-sections (46 canonical entries — `ISQM_SUBSECTIONS`)
+
+Phase 4b-2 Q5 initial 11 entries + Phase 4c c4 canonical 35 entries (Domain Reviewer 판정) + c4 pre-emptive 12 entries (parser-implementer + c5 Domain Reviewer confirm) = **총 46 canonical entries** (`frozenset` auto-dedupe 로 실제 unique 46 — `의견의 차이` 1건 Domain/parser 양측 독립 포함분 포함).
+
+##### intro 하위 (2 entries)
+
+- `이 품질관리기준서의 효력` (Phase 4b-2, idx=8 in body table)
+- `이 품질관리기준서의 범위` (c4 pre-emptive, intro 하위 scope 소개)
+
+##### definitions 하위 (1 entry)
+
+- `"회계법인", "네트워크", "네트워크 회계법인"의 정의` — **smart quotes (U+201C/U+201D) 실측 보존** (KICPA 원문 사용). straight quote (`"`) 버전은 등록 안 됨.
+
+##### requirements 하위 (36 entries)
+
+**리더십 / 품질관리시스템 구성요소** (6 entries):
+
+- `관련 요구사항의 적용과 준수` (Phase 4b-2)
+- `품질관리시스템의 구성요소` (Phase 4b-2)
+- `품질관리시스템의 문서화` (c4 pre-emptive)
+- `회계법인내 품질에 대한 리더십 책임` (Phase 4b-2)
+- `회계법인 품질관리시스템의 운영책임 지정` (c4 pre-emptive)
+- `품질에 대한 내부문화의 촉진` (c4 pre-emptive)
+
+**관련 윤리적 요구사항** (4 entries):
+
+- `관련 윤리적 요구사항` (Phase 4b-2)
+- `관련 윤리적 요구사항의 준수` (c4 canonical)
+- `독립성` (Phase 4b-2)
+- `유착위협` (c4 canonical)
+
+**의뢰인 관계 및 업무 수용** (4 entries):
+
+- `의뢰인 관계 및 특정 업무의 수용과 유지` (Phase 4b-2, space 포함 canonical)
+- `의뢰인관계 및 특정 업무의 수용과 유지` (c4 canonical, **space typo variant** 보수적 등록)
+- `의뢰인 관계의 유지` (c4 canonical)
+- `의뢰인의 성실성` (c4 canonical)
+
+**인적 자원 / 업무팀 / 업무 수행** (9 entries):
+
+- `인적 자원` (Phase 4b-2)
+- `업무팀의 배정` (Phase 4b-2)
+- `업무팀` (c4 canonical)
+- `업무수행이사` (c4 canonical)
+- `적격성, 역량과 자원` (c4 pre-emptive)
+- `업무의 수행` (Phase 4b-2)
+- `업무수행품질의 일관성` (c4 canonical)
+- `감독` (c4 canonical)
+- `검토` (c4 canonical)
+
+**업무 수행 — 자문 / 의견 차이 / 업무 해지** (3 entries):
+
+- `자문` (c4 pre-emptive)
+- `의견의 차이` (c4 canonical + c4 pre-emptive 양측 독립 포함)
+- `업무의 해지` (c4 canonical)
+
+**서면확인서 / 업무문서** (6 entries):
+
+- `서면확인서` (c4 canonical)
+- `업무문서화` (c4 canonical)
+- `업무의 문서화` (c4 canonical, KICPA linguistic variant)
+- `업무문서의 소유권` (c4 canonical)
+- `업무문서의 보존` (c4 canonical)
+- `업무문서의 비밀유지, 안전한 보관, 무결성, 접근성 및 재생가능성` (c4 canonical)
+
+**최종업무파일 취합** (2 entries):
+
+- `최종업무파일의 취합 완료` (c4 pre-emptive, space 포함)
+- `최종업무파일의 취합완료` (c4 pre-emptive, **space-less variant** 보수적 등록)
+
+**업무품질관리검토 (EQR)** (8 entries):
+
+- `업무품질관리검토` (c4 canonical)
+- `업무품질관리검토의 기준` (c4 canonical)
+- `업무품질관리검토 의 성격, 시기 및 범위` (c4 canonical, **KICPA 인쇄 typo `검토 의` 공백 preserved**)
+- `업무품질관리검토의 문서화` (c4 canonical)
+- `업무품질관리검토자의 적격성 기준` (c4 canonical)
+- `업무품질관리검토자의 객관성` (c4 canonical)
+- `업무품질관리검토자의 자문` (c4 canonical)
+- `충분하고 적합한 기술적 전문성, 경험 및 권한` (c4 pre-emptive, EQR reviewer 자격 상세)
+- `상장기업에 대한 업무품질관리검토` (c4 canonical)
+
+**모니터링 / 미비점 / 고충** (6 entries):
+
+- `모니터링` (Phase 4b-2)
+- `회계법인의 품질관리정책과 절차에 대한 모니터링` (c4 pre-emptive)
+- `식별된 미비점에 대한 평가, 커뮤니케이션 및 해결` (c4 canonical)
+- `미비점의 커뮤니케이션` (c4 canonical)
+- `고충과 진정` (c4 canonical)
+- `고충과 진정의 원천` (c4 canonical)
+- `조사 정책과 절차` (c4 pre-emptive)
+
+##### application 하위 (4 entries)
+
+- `공공부문 감사조직에 특유한 고려 사항` (c4 canonical, space 포함)
+- `공공부문 감사조직에 특유한 고려사항` (c4 canonical, **space-less variant** 보수적 등록)
+- `소규모 회계법인에 특유한 고려 사항` (c4 canonical, space 포함)
+- `소규모 회계법인에 특유한 고려사항` (c4 canonical, **space-less variant** 보수적 등록)
+
+#### 2.4.3 TOC column header skip (`ISQM_TABLE_HEADERS`, Phase 4c c4 신설)
+
+| heading | 처리 | 근거 |
+|---|---|---|
+| `문단번호` | **silent skip** (no WARNING) | ISQM body table `tbl[236x2]` 의 col[1] 제목 row (TOC 성격 — sub-section data 아님) |
+
+`_emit_heading_or_fallback` 내부에서 `canonical ∈ ISQM_TABLE_HEADERS` 검사가 `ISQM_SECTIONS` / `ISQM_SUBSECTIONS` 검사보다 선행 → TOC row 는 fallback PARAGRAPH_BODY emit 없이 즉시 skip.
+
+#### 2.4.4 Canonical strip 규약 (`_strip_reference_suffix`, Phase 4c c4 신설)
+
+KICPA 2018 ISQM-1 body table 의 sub-section heading 은 **관련 요구사항의 문단 참조** 를 괄호 suffix 로 동반하는 경우가 다수 (143건 WARNING 중 약 70%). 예:
+
+- `감독(문단 32(b) 참조)` → canonical `감독`
+- `서면확인서 (문단 24 참조)` → canonical `서면확인서`
+- `공공부문 감사조직에 특유한 고려 사항 (문단 26-28 관련)` → canonical `공공부문 감사조직에 특유한 고려 사항`
+
+**regex**:
+
+```python
+_REFERENCE_SUFFIX_RE: Final = re.compile(r"\s*\(문단[^)]*(참조|관련)[^)]*\)\s*$")
+```
+
+`ISQM_SUBSECTIONS` lookup 전 `_strip_reference_suffix(text)` 적용 → 원본 DOCX 의 문단번호 변경에도 resilient. KICPA 개정 시 sub-section heading 자체가 변하지 않는 한 매칭 유지.
+
+#### 2.4.5 KICPA 인쇄 typo preservation
+
+Phase 4c c3/c4 실측 결과 KICPA 2018 원본 DOCX 에 다음 **인쇄 typo variant** 공존 확인:
+
+| Canonical (정상) | Typo variant | 처리 |
+|---|---|---|
+| `공공부문 감사조직에 특유한 고려사항` | `공공부문 감사조직에 특유한 고려 사항` (공백) | **양 variant 등록** |
+| `소규모 회계법인에 특유한 고려사항` | `소규모 회계법인에 특유한 고려 사항` (공백) | **양 variant 등록** |
+| `의뢰인 관계 및 특정 업무의 수용과 유지` | `의뢰인관계 및 특정 업무의 수용과 유지` (공백 누락) | **양 variant 등록** |
+| `업무품질관리검토의 성격, 시기 및 범위` | `업무품질관리검토 의 성격, 시기 및 범위` (공백 삽입) | **typo variant 만 실측 — 등록** |
+| `최종업무파일의 취합완료` | `최종업무파일의 취합 완료` (공백) | **양 variant 등록** |
+
+**판정 근거**: parser normalize 로직 (space strip regex) 적용 시 다른 heading (e.g. `"관련 요구사항"`, `"업무수행 이사"` 등 공백 의미 있는 term) 에 의도치 않은 side-effect 리스크. **양 variant frozenset 등록이 보수적 해결**. KICPA 2018 freeze data 기준.
+
+**Smart quotes (U+201C/U+201D) preservation**: `"회계법인", "네트워크", "네트워크 회계법인"의 정의` heading 의 따옴표는 DOCX 원문의 smart quote (`"`, `"`). straight quote (`"`) 미사용 — unicode normalize 도 적용 금지.
+
+#### 2.4.6 Schema 영향 (v1.2.0 범위 내 처리, Phase 4d 자동 수용)
+
+§2.4 의 `ISQM_SUBSECTIONS` 46 entries + `ISQM_TABLE_HEADERS` 신설 + `_strip_reference_suffix` canonical match 규약은 **`docs/json_schema.md` v1.2.0 schema 범위 내에서 처리됨**. 별도 v1.3 bump 불필요.
+
+| Schema 요소 | 영향 | 근거 |
+|---|:-:|---|
+| `schema_version` const | ❌ | v1.2.0 유지 |
+| `section` enum | ❌ | sub-section 은 `heading_trail` 에 저장, `section` enum 은 primary 6건 유지 |
+| `chunk_id` 구조 | ❌ | 4-segment 포맷 + suffix chain 불변 |
+| `heading_trail_hash` 알고리즘 | ❌ | `sha1(cleaned text)` 유지 |
+| `standard_id` / `standard_no` pattern | ❌ | v1.2.0 regex 유지 |
+| `special_appendix_name` field | ❌ | Phase 4b-1 추가, c4/c5 미사용 |
+
+**Phase 4d (MD → JSON) 진입 시**: `output/md/ISQM-1.md` 재생성분이 v1.2.0 schema 내에서 자동 수용. `section` literal union 확장 (`effective_date` 등 ISQM 고유 값) 은 Phase 4d 일괄 처리 (별도 MINOR bump). 36 ISA JSON bit-level 불변 유지.
+
+#### 2.4.7 c3 WARNING 수렴 기록 (Phase 4c 3+2 공동 작업 결과)
+
+| 단계 | 값 | 비고 |
+|---|---:|---|
+| c3 landing 직후 WARNING | **143건 (unique 39+12)** | `[isqm_table_parser] unregistered heading row` stderr |
+| c4 `ISQM_SUBSECTIONS` 46 entries + canonical strip + TOC skip 적용 후 | **0건** (기대) | Phase 4c c4 landing 후 재 convert 검증 |
+| c5 docs patch (본 §2.4 확장) | N/A | docs-only, convert 영향 없음 |
+
+**Phase 4c 3+2 공동 작업 프로토콜** (ISQM Hook 1 + ASSR Hook 2 + FRMK Hook 3 + ASSR corner Hook 4) 완료. 파일 소유권 경계 엄수 (docs = domain reviewer / spec+parser+tests = parser-implementer) + atomic co-author commit (c4) + docs-only MINOR commit (c5) 분리.
 
 ### 2.5 KICPA 국내 추가 paragraph_id (`한{N}-{suffix}`)
 
