@@ -13,6 +13,7 @@ See :mod:`audit_parser.spec.standard_spec` for the dataclass contract and
 from __future__ import annotations
 
 from audit_parser.spec.isa_spec import ISA_SPEC
+from audit_parser.spec.isqm_spec import ISQM_SECTIONS, ISQM_SPEC, ISQM_SUBSECTIONS, ISQMSection
 from audit_parser.spec.standard_spec import (
     AppendixExtractor,
     BodyParser,
@@ -26,6 +27,10 @@ __all__ = [
     "AppendixExtractor",
     "BodyParser",
     "ISA_SPEC",
+    "ISQM_SECTIONS",
+    "ISQM_SPEC",
+    "ISQM_SUBSECTIONS",
+    "ISQMSection",
     "PreludeSkip",
     "SectionDetector",
     "StandardSpec",

@@ -70,6 +70,13 @@ class RawBlock:
             numPr 자체가 없으면 None — "0" 과 반드시 구별.
         ilvl: `w:numPr/w:ilvl w:val` 의 정수. numPr 없으면 None.
         table_cells: kind=TABLE 일 때 행×열 텍스트 그리드. 그 외 None.
+        paragraph_id: Phase 4b-2 — non-ISA specs (ISQM-1) 에서 cell text 로부터 직접
+            추출된 paragraph_id 를 전달하기 위한 선택적 override. ISA 경로는 항상
+            ``None`` — ``NumberingEngine.replay`` 결과가 ``structure.py`` 에서
+            ``Block.paragraph_id`` 로 주입됨. ISQM 처럼 numPr 이 아닌 table cell text
+            에 번호가 저장된 경우 이 필드에 pre-populated 되어 ``structure.py`` 가
+            NumberingEngine 을 건너뛰고 이 값을 채택. 기본값 ``None`` 유지로 ISA
+            바이트 동등성 보장.
     """
 
     idx: int
@@ -79,6 +86,7 @@ class RawBlock:
     num_id: str | None
     ilvl: int | None
     table_cells: tuple[tuple[str, ...], ...] | None = None
+    paragraph_id: str | None = None
 
 
 @dataclass(slots=True, frozen=True)

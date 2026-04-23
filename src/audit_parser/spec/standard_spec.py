@@ -43,8 +43,6 @@ if TYPE_CHECKING:
     # these for documentation + strict typing without runtime import cost.
     from lxml import etree
 
-    from audit_parser.ir.numbering import NumberingEngine
-    from audit_parser.ir.styles import StyleIndex
     from audit_parser.ir.types import RawBlock
 
 # ---------------------------------------------------------------------------
@@ -106,19 +104,20 @@ def isa_default_appendix_extractor(heading: str) -> tuple[int | None, str | None
 # ---------------------------------------------------------------------------
 
 
-BodyParser = Callable[
-    ["etree._Element", "NumberingEngine", "StyleIndex"],
-    "Iterable[RawBlock]",
-]
+BodyParser = Callable[["etree._Element"], "Iterable[RawBlock]"]
 """XML-level body parser — dispatch alternative to Phase 1 ``docx_reader.iter_body``.
 
-Receives the already-parsed document body element, the numbering engine, and
-the style index. Returns an ``Iterable[RawBlock]`` consumed by Phase 1
-``structure.py`` state machine. ``None`` value (default in ISA_SPEC) selects
-the legacy Phase 1 path.
+Receives a single ``<w:tbl>`` element (or other container) and returns an
+``Iterable[RawBlock]`` consumed by Phase 1 ``structure.py`` state machine.
+``None`` value (default in ISA_SPEC) selects the legacy Phase 1 path.
 
-Phase 4b-2 wiring:
+Phase 4b-2 c2 wiring:
     ``ISQM_SPEC.body_parser = parse_isqm_body_table`` (``ir/isqm_table_parser.py``)
+
+The ISQM-1 body table embeds paragraph_id in cell[0] text rather than in
+``numPr``, so the parser populates ``RawBlock.paragraph_id`` directly without
+consulting the ``NumberingEngine``. Specs that need numbering replay at this
+layer (none identified for Phase 4b-2) could expand the signature.
 
 Phase 4c wiring will add the ``if spec.body_parser is not None: ...`` branch
 inside ``docx_reader.iter_blocks`` — β-1 invariant: body_parser emits atomic
