@@ -68,6 +68,32 @@ _SUB_ID_RE: Final = re.compile(
 )
 
 
+# Phase 4c c4 추가 — reference suffix canonical strip (Domain Reviewer 2026-04-23
+# 판정 (c)). KICPA 2018 ISQM-1 body table sub-section headings 이 종종
+# ``(문단 N 참조)`` / ``(문단 N-M 관련)`` parenthetical reference 를 동반. 비교
+# 전 strip 하여 canonical form 으로 ISQM_SUBSECTIONS 매칭.
+# 예: "감독(문단 32(b) 참조)" → "감독"
+# 예: "업무의 해지 (문단 28 참조)" → "업무의 해지"
+# 예: "공공부문 감사조직에 특유한 고려 사항 (문단 26-28 관련)"
+#     → "공공부문 감사조직에 특유한 고려 사항"
+_REFERENCE_SUFFIX_RE: Final = re.compile(
+    r"\s*\(문단.*(?:참조|관련)\s*\)\s*$"
+)
+
+
+def _strip_reference_suffix(text: str) -> str:
+    """Strip trailing ``(문단 N 참조)`` / ``(문단 N-M 관련)`` suffix.
+
+    Returns canonical form for ISQM_SUBSECTIONS comparison. Idempotent —
+    calling twice on same text returns same result.
+
+    Supports KICPA body-table heading patterns including nested parentheses
+    for sub-item references: ``"감독(문단 32(b) 참조)"`` → ``"감독"``,
+    ``"업무품질관리검토의 기준 (문단 35(b) 참조)"`` → ``"업무품질관리검토의 기준"``.
+    """
+    return _REFERENCE_SUFFIX_RE.sub("", text).strip()
+
+
 def _extract_sub_id(text: str) -> str | None:
     """Return the sub-item prefix like ``"(a)"`` / ``"(가)"`` / ``"(i)"`` / ``"(1)"``.
 
@@ -137,6 +163,7 @@ def parse_isqm_body_table(
     *,
     isqm_sections: frozenset[str] | None = None,
     isqm_subsections: frozenset[str] | None = None,
+    isqm_table_headers: frozenset[str] | None = None,
     warn_unknown_headings: bool = True,
 ) -> Iterable[RawBlock]:
     """Parse an ISQM-1 2-column body table into a stream of ``RawBlock`` instances.
@@ -170,6 +197,7 @@ def parse_isqm_body_table(
     """
     sections = isqm_sections or frozenset()
     subsections = isqm_subsections or frozenset()
+    table_headers = isqm_table_headers or frozenset()
     emit_counter = 0
 
     for tr_elem in tbl_elem.iter(_TAG_TR):
@@ -192,6 +220,7 @@ def parse_isqm_body_table(
                     emit_counter,
                     sections,
                     subsections,
+                    table_headers,
                     warn_unknown_headings,
                 )
             )
@@ -235,28 +264,45 @@ def _emit_heading_or_fallback(
     idx: int,
     sections: frozenset[str],
     subsections: frozenset[str],
+    table_headers: frozenset[str],
     warn_unknown: bool,
 ) -> Iterable[RawBlock]:
-    """Classify an empty-col[0] row — HEADING (section/subsection) or
-    PARAGRAPH_BODY fallback with WARNING. Empty col[1] yields nothing."""
+    """Classify an empty-col[0] row — TOC header (silent skip), HEADING
+    (section/subsection), or PARAGRAPH_BODY fallback with WARNING.
+
+    Phase 4c c4 (Domain Reviewer 2026-04-23):
+
+    * ``table_headers`` match (``"문단번호"`` etc.) — silent skip, no WARNING.
+    * ``sections`` / ``subsections`` match — HEADING emit with
+      ``style="isqm_section"`` / ``"isqm_subsection"``.
+    * Comparison uses canonical form after ``_strip_reference_suffix`` —
+      e.g. ``"감독(문단 32(b) 참조)"`` matches canonical ``"감독"`` in
+      ISQM_SUBSECTIONS.
+    * Empty col[1] — layout filler, silent skip.
+    * No match — PARAGRAPH_BODY fallback + WARNING.
+    """
     if not col1_first_text:
         return
-    if col1_first_text in sections:
+    canonical = _strip_reference_suffix(col1_first_text)
+    # TOC column header — silent skip (e.g. "문단번호").
+    if canonical in table_headers:
+        return
+    if canonical in sections:
         yield RawBlock(
             idx=idx,
             kind=BlockKind.HEADING,
-            text=col1_first_text,
+            text=canonical,
             style="isqm_section",
             num_id=None,
             ilvl=None,
             paragraph_id=None,
         )
         return
-    if col1_first_text in subsections:
+    if canonical in subsections:
         yield RawBlock(
             idx=idx,
             kind=BlockKind.HEADING,
-            text=col1_first_text,
+            text=canonical,
             style="isqm_subsection",
             num_id=None,
             ilvl=None,
@@ -266,8 +312,8 @@ def _emit_heading_or_fallback(
     if warn_unknown:
         print(
             f"[isqm_table_parser] unregistered heading row "
-            f"(col[0]='', col[1]={col1_first_text!r}) — fallback to "
-            f"PARAGRAPH_BODY. Domain Reviewer: update "
+            f"(col[0]='', col[1]={col1_first_text!r}, canonical={canonical!r}) — "
+            f"fallback to PARAGRAPH_BODY. Domain Reviewer: update "
             f"`docs/isqm_structure_profile.md §2.4` "
             f"ISQM_SECTIONS / ISQM_SUBSECTIONS whitelist if intended.",
             file=sys.stderr,

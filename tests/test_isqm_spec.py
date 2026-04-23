@@ -163,9 +163,15 @@ def test_isqm_sections_whitelist() -> None:
     assert ISQM_SECTIONS == expected
 
 
-def test_isqm_subsections_whitelist() -> None:
-    """Domain Reviewer 2026-04-23 Q5 — 11-entry sub-section list."""
-    expected = {
+def test_isqm_subsections_whitelist_includes_phase4b2_baseline() -> None:
+    """Phase 4b-2 Q5 기존 11 entries + Phase 4c c4 확장분 포함 확인.
+
+    4b-2 초기 11 entries 는 ISQM_SUBSECTIONS 에 반드시 포함되어야 함
+    (backward-compat). c4 확장분은 Domain Reviewer 2026-04-23 판정 35 +
+    parser-implementer 사전 추가 12 → 총 46+ entries (set equality 는
+    향후 c5 patch 로 변동 가능하므로 subset 확인만).
+    """
+    phase4b2_baseline = {
         "이 품질관리기준서의 효력",
         "관련 요구사항의 적용과 준수",
         "품질관리시스템의 구성요소",
@@ -178,7 +184,13 @@ def test_isqm_subsections_whitelist() -> None:
         "업무의 수행",
         "모니터링",
     }
-    assert ISQM_SUBSECTIONS == expected
+    assert phase4b2_baseline <= ISQM_SUBSECTIONS, (
+        f"Phase 4b-2 baseline 11 entries must stay in ISQM_SUBSECTIONS. "
+        f"Missing: {phase4b2_baseline - ISQM_SUBSECTIONS}"
+    )
+    # c4 minimum: Domain Reviewer 35 + parser-implementer 12 = 47 추가 (smart quote
+    # entry 포함) = 최소 46 이상 (기존 11 + 신규 35 = 46).
+    assert len(ISQM_SUBSECTIONS) >= 46
 
 
 def test_isqm_sections_and_subsections_are_disjoint() -> None:

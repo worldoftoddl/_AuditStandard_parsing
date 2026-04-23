@@ -17,7 +17,13 @@ from __future__ import annotations
 from audit_parser.spec.assr_spec import ASSR_PRIMARY_SECTIONS, ASSR_SPEC, ASSRSection
 from audit_parser.spec.frmk_spec import FRMK_SPEC, FRMKSection, normalize_framework_heading
 from audit_parser.spec.isa_spec import ISA_SPEC
-from audit_parser.spec.isqm_spec import ISQM_SECTIONS, ISQM_SPEC, ISQM_SUBSECTIONS, ISQMSection
+from audit_parser.spec.isqm_spec import (
+    ISQM_SECTIONS,
+    ISQM_SPEC,
+    ISQM_SUBSECTIONS,
+    ISQM_TABLE_HEADERS,
+    ISQMSection,
+)
 from audit_parser.spec.standard_spec import (
     AppendixExtractor,
     BodyParser,
@@ -106,6 +112,7 @@ __all__ = [
     "ISQM_SECTIONS",
     "ISQM_SPEC",
     "ISQM_SUBSECTIONS",
+    "ISQM_TABLE_HEADERS",
     "ISQMSection",
     "PreludeSkip",
     "SectionDetector",
