@@ -33,11 +33,15 @@ import pytest
 from audit_parser.ingest.md_parser import parse_md, to_json_dict
 from audit_parser.ir.types import Section
 from audit_parser.spec import (
+    ASSR_SPEC,
+    FRMK_SPEC,
     ISA_SPEC,
+    ISQM_SPEC,
     AppendixExtractor,
     BodyParser,
     PreludeSkip,
     SectionDetector,
+    get_spec_for_standard_id,
     isa_default_appendix_extractor,
 )
 
@@ -498,3 +502,179 @@ def test_special_appendix_name_isa_default_null() -> None:
                 f"special_appendix_name expected None, got "
                 f"{c['special_appendix_name']!r} — ISA must always be None (B-v2)"
             )
+
+
+# ---------------------------------------------------------------------------
+# Phase 4b-2 c4 — prefix dispatcher (Critic P2 (a) LOCK)
+# ---------------------------------------------------------------------------
+
+
+def test_dispatcher_returns_isa_spec_for_isa_ids() -> None:
+    for candidate in ["ISA-200", "ISA-450", "ISA-720", "ISA-1200"]:
+        assert get_spec_for_standard_id(candidate) is ISA_SPEC
+
+
+def test_dispatcher_returns_isqm_spec() -> None:
+    assert get_spec_for_standard_id("ISQM-1") is ISQM_SPEC
+    assert get_spec_for_standard_id("ISQM-99") is ISQM_SPEC
+
+
+def test_dispatcher_returns_assr_spec() -> None:
+    assert get_spec_for_standard_id("ASSR-3000") is ASSR_SPEC
+    assert get_spec_for_standard_id("ASSR-3410") is ASSR_SPEC
+
+
+def test_dispatcher_returns_frmk_spec() -> None:
+    assert get_spec_for_standard_id("FRMK-1") is FRMK_SPEC
+
+
+@pytest.mark.parametrize(
+    "prefix_only",
+    ["ISA", "ISQM", "ASSR", "FRMK", ""],
+)
+def test_dispatcher_rejects_prefix_only_missing_separator(prefix_only: str) -> None:
+    """standard_id.partition('-') 가 sep='' 반환 → 2-step fail-fast 1단계."""
+    with pytest.raises(ValueError, match="missing '-' separator"):
+        get_spec_for_standard_id(prefix_only)
+
+
+@pytest.mark.parametrize(
+    "unknown",
+    [
+        "ISAE-3000",  # Phase 5 이월, scope 외
+        "ISRE-2400",  # Phase 5 이월, scope 외
+        "ISRS-4410",  # Phase 5 이월, scope 외
+        "XXXX-1",  # 임의 typo
+        "-200",  # 빈 prefix
+    ],
+)
+def test_dispatcher_rejects_unknown_prefix(unknown: str) -> None:
+    """_SPEC_REGISTRY.get() 가 None 반환 → 2-step fail-fast 2단계."""
+    with pytest.raises(ValueError, match="unknown prefix"):
+        get_spec_for_standard_id(unknown)
+
+
+@pytest.mark.parametrize(
+    "bad_id",
+    [
+        "ISA-1",  # 3-digit minimum 위반
+        "ISA-12345",  # 4-digit maximum 위반
+        "ISA-220R",  # Revised suffix — v1.3 bump 시 확장 여지
+        "ISQM-100",  # 2-digit maximum 위반 (Critic α)
+        "ASSR-30",  # 3-digit minimum 위반
+        "ASSR-99999",  # 4-digit maximum 위반
+        "FRMK-10",  # single digit 초과
+    ],
+)
+def test_dispatcher_rejects_intra_prefix_violation(bad_id: str) -> None:
+    """spec.validate_standard_id() fullmatch 실패 → 3-step fail-fast 3단계."""
+    with pytest.raises(ValueError):
+        get_spec_for_standard_id(bad_id)
+
+
+def test_dispatcher_returns_isa_for_all_36_existing_isa_standard_ids() -> None:
+    """ISA baseline 회귀 가드 — 36 ISA JSON 의 standard_id 전수 dispatcher PASS."""
+    existing_paths = _require_isa_output_present()
+    for json_path in existing_paths:
+        data = json.loads(json_path.read_text(encoding="utf-8"))
+        standard_id = data["standard"]["standard_id"]
+        spec = get_spec_for_standard_id(standard_id)
+        assert spec is ISA_SPEC, (
+            f"{json_path.name} dispatched to {spec.prefix} spec, expected ISA"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Phase 4b-2 c4 — Per-spec regex union ≡ §1.3.4 full regex (Plan §c exit gate #6)
+# ---------------------------------------------------------------------------
+
+
+def test_per_spec_regex_union_equals_full() -> None:
+    """4 per-spec regex 의 |-union = §1.3.4 full regex (behavioural equivalence).
+
+    Exhaustively verifies that (a) every standard_id accepted by any of the
+    4 per-spec regex is also accepted by the full regex, and (b) every id
+    accepted by the full regex is accepted by exactly one per-spec regex.
+    Catches drift where a per-spec regex is tightened/relaxed without
+    updating the full-regex test table (or vice versa).
+    """
+    # Candidates drawn from checkpoint_4_prep.md §1.3.4 matching table plus
+    # ``test_full_v1_2_regex_matches_checkpoint_4_prep_table`` expected set.
+    positive_candidates = [
+        # ISA
+        "ISA-200",
+        "ISA-450",
+        "ISA-1200",
+        # ISQM
+        "ISQM-1",
+        "ISQM-2",
+        "ISQM-10",
+        "ISQM-99",
+        # ASSR
+        "ASSR-3000",
+        "ASSR-3410",
+        "ASSR-999",
+        # FRMK
+        "FRMK-1",
+        "FRMK-2",
+        "FRMK-9",
+    ]
+    negative_candidates = [
+        "ISA-1",
+        "ISA-12345",
+        "ISA-220R",
+        "ISQM-100",
+        "ISQM",
+        "ASSR-30",
+        "ASSR-99999",
+        "FRMK",
+        "FRMK-10",
+        "ISAE-3000",
+        "ISRE-2400",
+    ]
+
+    per_spec = [
+        ISA_SPEC.standard_id_regex,
+        ISQM_SPEC.standard_id_regex,
+        ASSR_SPEC.standard_id_regex,
+        FRMK_SPEC.standard_id_regex,
+    ]
+
+    for candidate in positive_candidates:
+        # Full regex must accept.
+        assert _FULL_V1_2_REGEX.fullmatch(candidate) is not None, (
+            f"positive {candidate!r} rejected by full regex — drift?"
+        )
+        # Exactly one per-spec regex must accept.
+        matches = [r for r in per_spec if r.fullmatch(candidate) is not None]
+        assert len(matches) == 1, (
+            f"positive {candidate!r} matched by {len(matches)} per-spec regexes "
+            f"(expected exactly 1)"
+        )
+
+    for candidate in negative_candidates:
+        # Full regex must reject.
+        assert _FULL_V1_2_REGEX.fullmatch(candidate) is None, (
+            f"negative {candidate!r} accepted by full regex — drift?"
+        )
+        # No per-spec regex should accept.
+        matches = [r for r in per_spec if r.fullmatch(candidate) is not None]
+        assert not matches, (
+            f"negative {candidate!r} matched by per-spec regex(es) {matches} — drift?"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Phase 4b-2 c4 — ISA 4b-2-new-fields invariant (all None after full 4 specs land)
+# ---------------------------------------------------------------------------
+
+
+def test_isa_spec_fields_still_all_none_after_4b2_landing() -> None:
+    """4b-2 exit gate 구조적 보증 — 4 spec 전체 landing 후에도 ISA_SPEC 의 신규
+    3필드가 여전히 ``None``. c3 의 ASSR/FRMK spec 추가 시 ISA_SPEC 오염 가능성을
+    회귀 가드로 차단."""
+    assert ISA_SPEC.body_parser is None
+    assert ISA_SPEC.section_detector is None
+    assert ISA_SPEC.prelude_skip is None
+    # 그리고 기존 필드는 여전히 동일 default.
+    assert ISA_SPEC.appendix_extractor is isa_default_appendix_extractor
