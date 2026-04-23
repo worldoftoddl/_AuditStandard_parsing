@@ -35,6 +35,9 @@ from audit_parser.ir.types import Section
 from audit_parser.spec import (
     ISA_SPEC,
     AppendixExtractor,
+    BodyParser,
+    PreludeSkip,
+    SectionDetector,
     isa_default_appendix_extractor,
 )
 
@@ -322,6 +325,73 @@ def test_appendix_extractor_type_alias_is_callable() -> None:
     extractor: AppendixExtractor = ISA_SPEC.appendix_extractor
     assert callable(extractor)
     assert extractor("보론 3") == (3, None)
+
+
+# ---------------------------------------------------------------------------
+# Phase 4b-2 c1 — new optional dispatch fields
+# ---------------------------------------------------------------------------
+
+
+def test_isa_spec_body_parser_default_none() -> None:
+    """ISA_SPEC 의 ``body_parser`` 는 ``None`` — Phase 1 default docx_reader 경로
+    유지. 36 ISA byte-equivalence exit gate 의 구조적 보증."""
+    assert ISA_SPEC.body_parser is None
+
+
+def test_isa_spec_section_detector_default_none() -> None:
+    """ISA_SPEC 의 ``section_detector`` 는 ``None`` — heading-style 기본 detector
+    유지 (structure.py state machine PRE_TOC → TOC → STANDARD_BODY)."""
+    assert ISA_SPEC.section_detector is None
+
+
+def test_isa_spec_prelude_skip_default_none() -> None:
+    """ISA_SPEC 의 ``prelude_skip`` 은 ``None`` — ISA 는 00_전문.md prelude
+    skip 규약을 md_renderer 내부에서 처리, spec-level marker 불필요."""
+    assert ISA_SPEC.prelude_skip is None
+
+
+def test_isa_spec_4b2_fields_all_none() -> None:
+    """c1 단일 invariant — ISA_SPEC 은 Phase 4b-2 신규 3필드 전부 ``None``.
+
+    Critic β-1 guard (``docs/checkpoint_4_prep.md §1.8``) + ISA baseline
+    byte-equivalence (``docs/phase_4_plan.md §6 Phase 4b Exit gate``) 가
+    구조적으로 보증되려면 ISA 경로가 어떤 dispatch 필드도 trigger 하지 않아야
+    함. 이 테스트가 fail 하면 ISA 재파싱 경로가 new path 로 divert 된 것이므로
+    즉시 rollback.
+    """
+    assert ISA_SPEC.body_parser is None
+    assert ISA_SPEC.section_detector is None
+    assert ISA_SPEC.prelude_skip is None
+
+
+def test_new_field_type_aliases_are_importable() -> None:
+    """``BodyParser`` / ``SectionDetector`` / ``PreludeSkip`` public alias export.
+
+    각 alias 는 ``Callable[...]`` 의 typing GenericAlias — 런타임 isinstance
+    검증은 불가능하지만 import 가능성 자체가 4c wiring 시 정적 타입 참조
+    경로 보증.
+    """
+    assert BodyParser is not None
+    assert SectionDetector is not None
+    assert PreludeSkip is not None
+
+
+# ---------------------------------------------------------------------------
+# Phase 4b-2 c1 — per-spec regex union ≡ §1.3.4 full regex (drift guard)
+# ---------------------------------------------------------------------------
+
+
+def test_isa_spec_regex_subset_of_full_v1_2() -> None:
+    """ISA_SPEC.standard_id_regex.pattern 이 §1.3.4 full regex 의 ISA alt 와 동일.
+
+    4b-2 에 ISQM/ASSR/FRMK spec 진입 시 per-spec subset 이 full regex 와 drift
+    하지 않도록 c1 단계에서 ISA 기준 smoke check. c4 에서 4 spec 전체 union 검증
+    (``test_per_spec_regex_union_equals_full``, Plan §c exit gate #6).
+    """
+    assert ISA_SPEC.standard_id_regex.pattern == r"^ISA-\d{3,4}$"
+    assert ISA_SPEC.standard_no_regex.pattern == r"^\d{1,4}$"
+    # Full regex の ISA alt 는 v1.2.0 3자 합의 checkpoint_4_prep §1.3.4 와 1:1 일치.
+    assert "ISA-\\d{3,4}" in _FULL_V1_2_REGEX.pattern
 
 
 # ---------------------------------------------------------------------------
