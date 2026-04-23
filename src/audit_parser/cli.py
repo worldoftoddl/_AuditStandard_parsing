@@ -4,6 +4,13 @@
 (``unknown_numbering`` 5% 임계) 을 종료 코드로 강제한다. ``ingest`` 는 Phase 2
 Stage 2b (MD → JSON) 기본 경로에 Phase 3 ``--upsert`` 확장을 얹어 Upstage Solar
 임베딩 + Qdrant 적재까지 수행한다.
+
+Phase 4c c3 (2026-04-23):
+    ``convert`` 는 ``--prefix`` 명시 플래그 (primary) + 파일명 heuristic fallback
+    + ambiguous → ValueError (silent ISA fallback 금지 — Critic #X1 dispatcher
+    fail-fast 원칙 consistency). heuristic 매핑은 Domain Reviewer Check 4 에서
+    제공한 longer-first 순서. Phase 5+ ISAE 3400/3410 확장 시 heuristic entry 1행
+    추가 or ``--prefix`` 명시 양방향.
 """
 
 from __future__ import annotations
@@ -13,7 +20,7 @@ import os
 import time
 import zipfile
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 import typer
 
@@ -26,6 +33,13 @@ from audit_parser.ir import (
     iter_body,
     parse_numbering_from_docx,
 )
+from audit_parser.spec import (
+    ASSR_SPEC,
+    FRMK_SPEC,
+    ISA_SPEC,
+    ISQM_SPEC,
+    StandardSpec,
+)
 
 if TYPE_CHECKING:
     from audit_parser.ingest.embedder import EmbedStats
@@ -35,6 +49,94 @@ if TYPE_CHECKING:
 app = typer.Typer(help="Audit standards DOCX parsing pipeline.")
 
 # -- convert -----------------------------------------------------------------
+
+# Phase 4c c3 — prefix heuristic table (Domain Reviewer Check 4 longer-first 순서).
+# FRMK 먼저 검사 → ``"인증업무개념체계"`` ⊂ ``"인증업무"`` overlap 방지.
+# Phase 5+ ISAE 3400/3410 / ISRE 2400/2410 확장 시 1행 추가.
+# Mismatch 갱신 시 본 table 우선 갱신 의무 (Critic #X1 verbal — 미래 규약 변경 시
+# silent stale 회피).
+_PREFIX_HEURISTIC: Final[list[tuple[str, str]]] = [
+    ("인증업무개념체계", "FRMK"),
+    ("품질관리기준서", "ISQM"),
+    ("역사적 재무정보", "ASSR"),
+    ("이외의 인증업무기준", "ASSR"),  # ASSR alias
+    ("회계감사기준", "ISA"),
+]
+
+_SPEC_BY_PREFIX: Final[dict[str, StandardSpec]] = {
+    "ISA": ISA_SPEC,
+    "ISQM": ISQM_SPEC,
+    "ASSR": ASSR_SPEC,
+    "FRMK": FRMK_SPEC,
+}
+
+# Phase 4c c3 — non-ISA default standard_no (Plan v2 §6 targets).
+# ISA 는 standard boundary 가 ``감사기준서 NNN`` heading 1 로 자연 검출되므로 None.
+# ISQM/FRMK 는 단일 standard ("1"), ASSR 는 ISAE 3000 번역본 ("3000").
+_DEFAULT_STANDARD_NO: Final[dict[str, str | None]] = {
+    "ISA": None,  # heading-1 boundary 자동 감지
+    "ISQM": "1",  # ISQM-1 (품질관리기준서 2018)
+    "ASSR": "3000",  # ASSR-3000 (ISAE 3000 2022)
+    "FRMK": "1",  # FRMK-1 (인증업무개념체계 2022)
+}
+
+
+def _infer_prefix_from_filename(path: Path) -> str | None:
+    """Heuristic prefix inference from DOCX filename.
+
+    Phase 4c c3 — Domain Reviewer Check 4 longer-first ranking. Returns the
+    inferred prefix or raises ``ValueError`` on ambiguity (multiple unique
+    matches). Returns ``None`` if no substring matches — caller raises with
+    an explicit help message directing the user to ``--prefix``.
+
+    Examples:
+        >>> _infer_prefix_from_filename(Path("raw/3. 품질관리기준서1(2018년 제정)_국어전문.docx"))
+        'ISQM'
+        >>> _infer_prefix_from_filename(Path("raw/인증업무개념체계(2022년 개정)_전문.docx"))
+        'FRMK'
+    """
+    name = path.name
+    matches = [prefix for substring, prefix in _PREFIX_HEURISTIC if substring in name]
+    unique = set(matches)
+    if not unique:
+        return None
+    if len(unique) > 1:
+        raise ValueError(
+            f"Ambiguous prefix for {name!r}: matches {sorted(unique)}. "
+            f"Specify --prefix explicitly."
+        )
+    return matches[0]
+
+
+def _resolve_spec(docx: Path, prefix_override: str | None) -> StandardSpec:
+    """Resolve ``StandardSpec`` from CLI ``--prefix`` + filename heuristic.
+
+    Two-step fail-fast:
+
+    1. If ``--prefix`` explicit, look up directly (unknown prefix → ValueError).
+    2. Else call ``_infer_prefix_from_filename``:
+       * Single match → spec.
+       * Ambiguous → ValueError (raised inside helper).
+       * No match → ValueError with explicit help.
+
+    Silent ISA fallback 금지 — Critic #X1 dispatcher fail-fast 원칙 consistency.
+    """
+    if prefix_override is not None:
+        spec = _SPEC_BY_PREFIX.get(prefix_override)
+        if spec is None:
+            raise ValueError(
+                f"Unknown --prefix {prefix_override!r}; known: "
+                f"{sorted(_SPEC_BY_PREFIX)}"
+            )
+        return spec
+    inferred = _infer_prefix_from_filename(docx)
+    if inferred is None:
+        raise ValueError(
+            f"Could not infer prefix from filename {docx.name!r}. "
+            f"Specify --prefix explicitly (one of {sorted(_SPEC_BY_PREFIX)})."
+        )
+    return _SPEC_BY_PREFIX[inferred]
+
 
 _DOCX_ARG = typer.Argument(..., exists=True, file_okay=True, dir_okay=False)
 _OUT_OPT = typer.Option(Path("output/md/"), "--out", "-o")
@@ -46,6 +148,12 @@ _UNKNOWN_THRESHOLD_OPT = typer.Option(
     max=1.0,
     help="unknown_numbering / total_blocks 가 이 값 초과 시 exit 1 (C7).",
 )
+_PREFIX_OPT = typer.Option(
+    None,
+    "--prefix",
+    help="StandardSpec prefix 명시 (ISA | ISQM | ASSR | FRMK). 미지정 시 파일명 "
+    "heuristic 추론; ambiguous → ValueError (silent ISA fallback 금지).",
+)
 
 
 @app.command()
@@ -54,20 +162,41 @@ def convert(
     out: Path = _OUT_OPT,
     dry_run: bool = _DRY_RUN_OPT,
     unknown_threshold: float = _UNKNOWN_THRESHOLD_OPT,
+    prefix: str | None = _PREFIX_OPT,
 ) -> None:
-    """docx → structured markdown (Phase 1) — C7 UNKNOWN 임계 가드 포함."""
+    """docx → structured markdown (Phase 1) — C7 UNKNOWN 임계 가드 포함.
+
+    Phase 4c c3: ``--prefix`` 명시 or 파일명 heuristic 으로 :class:`StandardSpec`
+    선택. ``iter_body(spec=...)`` / ``iter_blocks(spec=...)`` / ``write_markdown_files(spec=...)``
+    3 곳에 동일 spec 전달 → body_parser / section_detector / prelude_skip / FRMK
+    normalize 등 spec-specific wiring 일관 적용.
+    """
     out.mkdir(parents=True, exist_ok=True)
+    spec = _resolve_spec(docx, prefix)
+    default_no = _DEFAULT_STANDARD_NO.get(spec.prefix)
     with zipfile.ZipFile(docx) as zf:
         abstract_nums, num_defs = parse_numbering_from_docx(zf)
     engine = NumberingEngine(abstract_nums, num_defs)
     source_file = docx.name
     # materialize — C7 ratio 계산 및 sample idx 로깅을 위해 한 번 적재.
-    blocks = list(iter_blocks(iter_body(docx), engine))
+    blocks = list(
+        iter_blocks(
+            iter_body(docx, spec=spec),
+            engine,
+            spec=spec,
+            default_standard_no=default_no,
+        )
+    )
     total_blocks = len(blocks)
     if dry_run:
-        typer.echo(f"[dry-run] processed {total_blocks} blocks from {source_file}")
+        typer.echo(
+            f"[dry-run] processed {total_blocks} blocks from {source_file} "
+            f"(spec={spec.prefix})"
+        )
         return
-    paths = write_markdown_files(blocks, source_file=source_file, out_dir=out)
+    paths = write_markdown_files(
+        blocks, source_file=source_file, out_dir=out, spec=spec
+    )
     metrics = engine.metrics()
     unknown = metrics.get("unknown_numbering", 0)
     ratio = unknown / total_blocks if total_blocks else 0.0

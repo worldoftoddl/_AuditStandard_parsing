@@ -93,6 +93,7 @@ def iter_blocks(
     engine: NumberingEngine,
     *,
     spec: StandardSpec | None = None,
+    default_standard_no: str | None = None,
 ) -> Iterator[Block]:
     """`RawBlock` Iterator → `Block` Iterator.
 
@@ -103,8 +104,18 @@ def iter_blocks(
         ``spec`` (default ISA_SPEC) 이 ``prelude_skip`` 또는 ``section_detector``
         를 제공하는 경우, feed 에서 caller-owned state (``_in_prelude``) 로 prelude
         blocks 를 drop (None 반환). 따라서 본 함수는 None 이 아닌 Block 만 yield.
+
+    Phase 4c c3:
+        ``default_standard_no`` 주입 시 ``StructureMachine`` 이 초기화 시점에
+        ``_enter_standard(no, None)`` 을 선제 호출 → 비-ISA spec (ISQM/ASSR/FRMK)
+        처럼 ``감사기준서 NNN`` heading 1 boundary 가 부재인 DOCX 에서도
+        ``Block.standard_no`` 가 채워져 md_renderer 가 ``{PREFIX}-{no}.md`` 파일로
+        라우팅 가능. ISA 경로는 ``default_standard_no=None`` 유지 → ``감사기준서 NNN``
+        heading 1 매칭으로만 boundary 감지 (기존 Phase 1 동작 불변).
     """
-    machine = StructureMachine(engine, spec=spec)
+    machine = StructureMachine(
+        engine, spec=spec, default_standard_no=default_standard_no
+    )
     for raw in raw_blocks:
         block = machine.feed(raw)
         if block is not None:
@@ -138,6 +149,7 @@ class StructureMachine:
         engine: NumberingEngine,
         *,
         spec: StandardSpec | None = None,
+        default_standard_no: str | None = None,
     ) -> None:
         # Lazy default — avoid circular import at module load time.
         if spec is None:
@@ -161,6 +173,18 @@ class StructureMachine:
         # section_detector (ASSR) 용 text-based current section name. None = 감지
         # 규약 미적용 (ISA default).
         self._current_section_text: str | None = None
+        # Phase 4c c3 — non-ISA DOCX 용 standard_no 선제 bootstrap.
+        # ISQM/ASSR/FRMK 은 ``감사기준서 NNN`` heading 1 boundary 가 부재 → 기본
+        # state machine 은 영원히 PRE_TOC 에 머물러 standard_no=None → md_renderer
+        # 가 모든 block 을 prelude (00_전문.md) 로 dump. 선제 ``_enter_standard``
+        # 호출로 STANDARD_BODY + standard_no 설정 → ``{PREFIX}-{no}.md`` 라우팅 활성화.
+        # ISA 경로는 ``default_standard_no=None`` 유지 → 기존 heading 1 감지 로직
+        # 그대로. 36 ISA JSON byte-equiv 보장.
+        if default_standard_no is not None:
+            # ``_enter_standard`` 가 standard_no 를 ``format_standard_id`` 로 검증할
+            # 수 있는 지점 — spec regex 매칭 실패 시 fail-fast.
+            spec.format_standard_id(default_standard_no)
+            self._enter_standard(default_standard_no, None)
 
     # -- public ------------------------------------------------------------
 
@@ -295,11 +319,20 @@ class StructureMachine:
         return False
 
     def _enter_standard(self, no: str, title_group: str | None) -> None:
-        """새 기준서 진입 — 스택·섹션·parent 트래킹 전부 초기화 후 engine.reset()."""
+        """새 기준서 진입 — 스택·섹션·parent 트래킹 전부 초기화 후 engine.reset().
+
+        Phase 4c c3: heading stack seed 는 ISA 경로에선 ``"감사기준서 NNN"``
+        legacy format 그대로 (36 ISA JSON byte-equiv 보장). 비-ISA spec 에선
+        ``{PREFIX}-{no}`` (예: ``"ISQM-1"`` / ``"FRMK-1"`` / ``"ASSR-3000"``) 을
+        seed 로 사용 — heading_trail 의 top-level 표시가 spec-정합.
+        """
         self._standard_no = no
         self._standard_title = title_group.strip() if title_group else None
         self._state = "STANDARD_BODY"
-        self._heading_stack = [(1, f"감사기준서 {no}")]
+        if self._spec.prefix == "ISA":
+            self._heading_stack = [(1, f"감사기준서 {no}")]
+        else:
+            self._heading_stack = [(1, self._spec.format_standard_id(no))]
         self._current_section = None
         self._last_level0_paragraph_id = None
         self._engine.reset()

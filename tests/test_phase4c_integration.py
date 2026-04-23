@@ -449,3 +449,230 @@ def test_parse_md_default_spec_is_none_for_auto_dispatch() -> None:
     sig = inspect.signature(parse_md)
     spec_param = sig.parameters["spec"]
     assert spec_param.default is None
+
+
+# ---------------------------------------------------------------------------
+# c3 — CLI --prefix + heuristic 10건 (Critic #X1 Option A + Domain Check 4)
+# ---------------------------------------------------------------------------
+
+
+def test_infer_prefix_heuristic_4_real_filenames() -> None:
+    """4 실제 KICPA DOCX 파일명 heuristic 매핑."""
+    from pathlib import Path
+
+    from audit_parser.cli import _infer_prefix_from_filename
+
+    assert (
+        _infer_prefix_from_filename(
+            Path("raw/3. 품질관리기준서1(2018년 제정)_국어전문.docx")
+        )
+        == "ISQM"
+    )
+    assr_name = (
+        "raw/역사적 재무정보에 대한 감사 및 검토 이외의 "
+        "인증업무기준(2022년 개정)_전문(개정개요 포함).docx"
+    )
+    assert _infer_prefix_from_filename(Path(assr_name)) == "ASSR"
+    assert (
+        _infer_prefix_from_filename(Path("raw/인증업무개념체계(2022년 개정)_전문.docx"))
+        == "FRMK"
+    )
+    assert (
+        _infer_prefix_from_filename(Path("raw/0. 회계감사기준 전문(2025 개정).docx"))
+        == "ISA"
+    )
+
+
+def test_infer_prefix_ambiguous_raises_valueerror() -> None:
+    """Multiple prefix substrings → ambiguous, silent mis-dispatch 차단."""
+    from pathlib import Path
+
+    import pytest
+
+    from audit_parser.cli import _infer_prefix_from_filename
+
+    with pytest.raises(ValueError, match="Ambiguous prefix"):
+        _infer_prefix_from_filename(
+            Path("raw/품질관리기준서_인증업무개념체계_합본.docx")
+        )
+
+
+def test_infer_prefix_no_match_returns_none() -> None:
+    """heuristic 실패 시 None — caller 가 help message 표시."""
+    from pathlib import Path
+
+    from audit_parser.cli import _infer_prefix_from_filename
+
+    assert _infer_prefix_from_filename(Path("raw/unknown_standard.docx")) is None
+
+
+def test_resolve_spec_prefix_override_takes_precedence() -> None:
+    """--prefix 명시 시 파일명 heuristic 무시."""
+    from pathlib import Path
+
+    from audit_parser.cli import _resolve_spec
+    from audit_parser.spec import ISQM_SPEC
+
+    # 파일명으로는 FRMK 가 추론되지만 --prefix ISQM 명시.
+    resolved = _resolve_spec(
+        Path("raw/인증업무개념체계(2022년 개정)_전문.docx"),
+        prefix_override="ISQM",
+    )
+    assert resolved is ISQM_SPEC
+
+
+def test_resolve_spec_unknown_prefix_raises() -> None:
+    """--prefix 미등록 값 rejection."""
+    from pathlib import Path
+
+    import pytest
+
+    from audit_parser.cli import _resolve_spec
+
+    with pytest.raises(ValueError, match="Unknown --prefix"):
+        _resolve_spec(Path("raw/dummy.docx"), prefix_override="XXXX")
+
+
+def test_resolve_spec_no_heuristic_match_raises_with_help() -> None:
+    """파일명 heuristic 실패 + --prefix 미지정 → ValueError with help."""
+    from pathlib import Path
+
+    import pytest
+
+    from audit_parser.cli import _resolve_spec
+
+    with pytest.raises(ValueError, match="Specify --prefix explicitly"):
+        _resolve_spec(Path("raw/unknown_standard.docx"), prefix_override=None)
+
+
+@pytest.mark.parametrize(
+    "prefix,expected_spec_prefix",
+    [("ISA", "ISA"), ("ISQM", "ISQM"), ("ASSR", "ASSR"), ("FRMK", "FRMK")],
+)
+def test_resolve_spec_explicit_prefix_all_4(
+    prefix: str, expected_spec_prefix: str
+) -> None:
+    """4 prefix 명시 positive — silent fallback 없음."""
+    from pathlib import Path
+
+    from audit_parser.cli import _resolve_spec
+
+    # 파일명이 aware 없어도 명시 prefix 로 spec 선택.
+    spec = _resolve_spec(Path("raw/unknown.docx"), prefix_override=prefix)
+    assert spec.prefix == expected_spec_prefix
+
+
+# ---------------------------------------------------------------------------
+# c3 — Critic Q2 3-level suffix chunk_id 결정적 invariant
+# ---------------------------------------------------------------------------
+
+
+def test_no_3level_suffix_in_existing_isa_chunks() -> None:
+    """Critic Q2 결정적 β-1 invariant (baseline check).
+
+    36 ISA JSON 의 기존 chunk_id set 에 3-level ``#\\d+#\\d+#\\d+`` 존재 부재
+    확인. Phase 4c c2 body_parser wiring 이 3-level 유발하지 않아야 함.
+
+    Phase 4d 에서 실제 ISQM/ASSR/FRMK JSON 생성 후 동일 invariant 를 전 collection
+    에 적용 (그 때는 `full_pipeline_from_docx` helper 작성 후 통합 test 확장).
+    """
+    import json
+    import re
+    from pathlib import Path
+
+    SUFFIX_3LEVEL_RE = re.compile(r"#\d+#\d+#\d+")
+
+    isa_json_dir = Path(__file__).parent.parent / "output" / "json"
+    isa_jsons = list(isa_json_dir.glob("ISA-*.json"))
+    if not isa_jsons:
+        pytest.skip("output/json/ISA-*.json not present — skip β-1 ISA invariant")
+
+    violations: list[str] = []
+    for json_path in isa_jsons:
+        data = json.loads(json_path.read_text(encoding="utf-8"))
+        for chunk in data.get("chunks", []):
+            chunk_id = chunk.get("chunk_id", "")
+            if SUFFIX_3LEVEL_RE.search(chunk_id):
+                violations.append(chunk_id)
+
+    assert not violations, (
+        f"ISA baseline: 3-level suffix detected {violations[:3]}... "
+        f"β-1 violated (docs/checkpoint_4_prep.md §1.8, Critic β-1 guard)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# c3 — FRMK special_appendix_name JSON payload smoke (Domain Check 5)
+# ---------------------------------------------------------------------------
+
+
+def test_frmk_special_appendix_name_extraction_smoke() -> None:
+    """Domain Reviewer Check 5 (c3 smoke) — FRMK 보론 extraction 계약 검증.
+
+    ``_extract_appendix_data`` 를 FRMK_SPEC.appendix_extractor 로 직접 호출 →
+    ``("FRMK-1", "보론: 역할과 책임")`` heading_trail 에서 ``(None, "역할과 책임")``
+    튜플 반환 확인. ``section="appendix"`` gate 통과 필수 (ISA/ISQM/ASSR 은 heading
+    2 style 로 section=appendix 분류, FRMK 는 section_detector + state machine 에서
+    결정).
+
+    Phase 4d 전수 검증 시 전체 pipeline (DOCX → MD → JSON) 에서 실 chunk 의
+    ``special_appendix_name="역할과 책임"`` payload JSON 직렬화 확인 예정.
+    """
+    from audit_parser.ingest.md_parser import _extract_appendix_data
+    from audit_parser.spec import FRMK_SPEC
+
+    # FRMK un-numbered 보론 heading_trail
+    heading_trail = ("인증업무개념체계", "보론: 역할과 책임")
+    idx, name = _extract_appendix_data(
+        "appendix", heading_trail, FRMK_SPEC.appendix_extractor
+    )
+    assert idx is None
+    assert name == "역할과 책임"
+
+    # Numbered case: 보론 1 → (1, None)
+    numbered_trail = ("인증업무개념체계", "보론 1: 회계감사기준위원회가 제정한 기준")
+    idx2, name2 = _extract_appendix_data(
+        "appendix", numbered_trail, FRMK_SPEC.appendix_extractor
+    )
+    assert idx2 == 1
+    assert name2 is None
+
+
+def test_frmk_special_appendix_name_json_serialization_smoke() -> None:
+    """Domain Reviewer Check 5 (bonus) — ChunkRecord(special_appendix_name="역할과 책임")
+    가 ``to_json_dict`` 경로에서 JSON ``"special_appendix_name": "역할과 책임"`` 키-값
+    으로 직렬화되는지 실측. 4b-2 schema v1.2.0 infrastructure (``types.py:122`` 필드 +
+    ``md_parser:941`` serialization) 의 end-to-end 계약 조기 검증.
+
+    ISA 기존 36 JSON 은 전부 ``special_appendix_name: null`` 유지 (4b-2 exit gate
+    `test_special_appendix_name_isa_default_null`). 본 test 는 FRMK 가 non-null
+    value 를 emit 하는 경로가 깨지지 않음을 smoke level 로 확인.
+    """
+    from audit_parser.ingest.md_parser import _chunk_to_json
+    from audit_parser.ingest.types import ChunkRecord
+
+    # FRMK 보론: 역할과 책임 chunk — Phase 4d 에서 실 DOCX parse 후 자연 발생할
+    # 수 있는 record 형태를 smoke level 로 모의.
+    frmk_appendix_chunk = ChunkRecord(
+        chunk_id="FRMK-1:appendix:deadbeef:1.",
+        paragraph_id="1.",
+        kind="requirement",
+        section="appendix",
+        appendix_index=None,
+        heading_trail=("인증업무개념체계", "보론: 역할과 책임"),
+        heading_trail_hash="deadbeef",
+        content_text="어떤 인증업무에서든 역할과 책임의 정의는 필수다.",
+        content_markdown="어떤 인증업무에서든 역할과 책임의 정의는 필수다.",
+        authority=1,
+        parent_paragraph_id=None,
+        is_application_guidance=False,
+        token_estimate=20,
+        chunk_index=1,
+        chunk_of=1,
+        source_idx=100,
+        special_appendix_name="역할과 책임",
+    )
+    serialized = _chunk_to_json(frmk_appendix_chunk)
+    assert serialized["special_appendix_name"] == "역할과 책임"
+    assert serialized["appendix_index"] is None
+    assert serialized["chunk_id"] == "FRMK-1:appendix:deadbeef:1."
