@@ -129,8 +129,8 @@ def parse_isqm_body_table(tbl_elem, *, numbering_engine) -> Iterable[RawBlock]:
 
 ### 2.4 실측 Section 목록 (body table 내부)
 
-`tmp/phase4_deepscan.py` + row-by-row 실측 (Phase 4a) + **Phase 4c c3 실 convert WARNING 로그 수집 (N=143 → canonical 46)** 통합 실측 결과.
-Phase 4c c4 (`2c8446b`) 에서 `ISQM_SUBSECTIONS` frozenset 46 entries + `ISQM_TABLE_HEADERS` 신설 + `_strip_reference_suffix` canonical match 규약 반영 완료 (`src/audit_parser/spec/isqm_spec.py`). 본 §2.4 는 Phase 4c c5 (`docs-only`) 에서 도메인 rationale 문서화로 동기 bump.
+`tmp/phase4_deepscan.py` + row-by-row 실측 (Phase 4a) + **Phase 4c c3 실 convert WARNING 로그 수집 (N=143 stderr 로그 → 39 visible unique + 12 cutoff = 51 canonical 확장 대상, baseline 11 포함 시 `ISQM_SUBSECTIONS` 57 effective entries)** 통합 실측 결과.
+Phase 4c c4 (`2c8446b`) 에서 `ISQM_SUBSECTIONS` frozenset 57 effective entries (11 baseline + 35 Domain canonical + 12 parser pre-emptive = 58 logical, `의견의 차이` 1건 Domain/parser 양측 독립 포함분 auto-dedupe) + `ISQM_TABLE_HEADERS` 신설 + `_strip_reference_suffix` canonical match 규약 반영 완료 (`src/audit_parser/spec/isqm_spec.py`). 본 §2.4 는 Phase 4c c5 / c6 (`docs-only`) 에서 도메인 rationale 문서화로 동기 bump.
 
 #### 2.4.1 Primary sections (6 entries — `ISQM_SECTIONS`)
 
@@ -143,9 +143,11 @@ Phase 4c c4 (`2c8446b`) 에서 `ISQM_SUBSECTIONS` frozenset 46 entries + `ISQM_T
 | `requirements` | `요구사항` | 리더십 / 윤리 / 인적 자원 / 의뢰인 관계 / 업무수행 / 모니터링 등 하위 |
 | `application` | `적용 및 기타 설명자료` | 각 요구사항의 적용지침 |
 
-#### 2.4.2 Sub-sections (46 canonical entries — `ISQM_SUBSECTIONS`)
+#### 2.4.2 Sub-sections (57 effective entries — `ISQM_SUBSECTIONS`)
 
-Phase 4b-2 Q5 initial 11 entries + Phase 4c c4 canonical 35 entries (Domain Reviewer 판정) + c4 pre-emptive 12 entries (parser-implementer + c5 Domain Reviewer confirm) = **총 46 canonical entries** (`frozenset` auto-dedupe 로 실제 unique 46 — `의견의 차이` 1건 Domain/parser 양측 독립 포함분 포함).
+Phase 4b-2 Q5 initial 11 entries + Phase 4c c4 canonical 35 entries (Domain Reviewer 판정) + c4 pre-emptive 12 entries (parser-implementer + c5 Domain Reviewer confirm) = **총 58 logical entries** (`frozenset` auto-dedupe 로 실제 unique **57 entries** — `의견의 차이` 1건 Domain/parser 양측 독립 포함 시 frozenset 자동 중복 제거).
+
+**Math breakdown**: 11 baseline (Phase 4b-2 Q5) + 35 Domain canonical (Phase 4c c3 판정) + 12 parser pre-emptive (c4 preemptive, Domain c5 confirm) = 58 logical; dedupe `의견의 차이` (Domain list #32 + pre-emptive list #2) = 57 unique.
 
 ##### intro 하위 (2 entries)
 
@@ -284,7 +286,7 @@ Phase 4c c3/c4 실측 결과 KICPA 2018 원본 DOCX 에 다음 **인쇄 typo var
 
 #### 2.4.6 Schema 영향 (v1.2.0 범위 내 처리, Phase 4d 자동 수용)
 
-§2.4 의 `ISQM_SUBSECTIONS` 46 entries + `ISQM_TABLE_HEADERS` 신설 + `_strip_reference_suffix` canonical match 규약은 **`docs/json_schema.md` v1.2.0 schema 범위 내에서 처리됨**. 별도 v1.3 bump 불필요.
+§2.4 의 `ISQM_SUBSECTIONS` 57 effective entries + `ISQM_TABLE_HEADERS` 신설 + `_strip_reference_suffix` canonical match 규약은 **`docs/json_schema.md` v1.2.0 schema 범위 내에서 처리됨**. 별도 v1.3 bump 불필요.
 
 | Schema 요소 | 영향 | 근거 |
 |---|:-:|---|
@@ -302,7 +304,7 @@ Phase 4c c3/c4 실측 결과 KICPA 2018 원본 DOCX 에 다음 **인쇄 typo var
 | 단계 | 값 | 비고 |
 |---|---:|---|
 | c3 landing 직후 WARNING | **143건 (unique 39+12)** | `[isqm_table_parser] unregistered heading row` stderr |
-| c4 `ISQM_SUBSECTIONS` 46 entries + canonical strip + TOC skip 적용 후 | **0건** (기대) | Phase 4c c4 landing 후 재 convert 검증 |
+| c4 `ISQM_SUBSECTIONS` 57 effective entries + canonical strip + TOC skip 적용 후 | **0건** (기대) | Phase 4c c4 landing 후 재 convert 검증 |
 | c5 docs patch (본 §2.4 확장) | N/A | docs-only, convert 영향 없음 |
 
 **Phase 4c 3+2 공동 작업 프로토콜** (ISQM Hook 1 + ASSR Hook 2 + FRMK Hook 3 + ASSR corner Hook 4) 완료. 파일 소유권 경계 엄수 (docs = domain reviewer / spec+parser+tests = parser-implementer) + atomic co-author commit (c4) + docs-only MINOR commit (c5) 분리.
