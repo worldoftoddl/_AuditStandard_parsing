@@ -21,14 +21,51 @@
 
 ---
 
-## 0. Executive Summary (scaffold — 4f 완료 시 최종)
+## 0a. Phase 4f Final Addendum (2026-04-28)
 
-| 항목 | 현 시점 판정 | 비고 |
+Phase 4b~4f 실측 후 최종 판정:
+
+| 항목 | 실측 | Critic 판정 |
+|---|---:|---|
+| 4 collection point-count invariant | 10,387 / 10,387 | ✅ PASS |
+| Payload index baseline | 12 / 12 fields | ✅ PASS |
+| ISQM Mini Golden Recall@5 | 1.000000 | ✅ PASS |
+| ISQM Mini Golden MRR@10 | 0.677083 | ✅ PASS |
+| `ko_en` Recall@5 | 1.000000 | ✅ PASS |
+| C-P2-1 realized annual invalidation | 0.0% | ✅ No trigger |
+| Non-ISA-1200 split census | 0 additional split chunks | ✅ No §9.5 bump |
+
+**Go/No-Go**: **GO to Phase 5**. Phase 4의 핵심 리스크였던 multi-standard
+ingest, Qdrant schema parity, Mini Golden 한/영 혼재 검색은 통과했다.
+
+남은 비판 사항:
+
+1. ISQM/ASSR `section=null` 100%는 검색 품질을 막지는 않았지만 metadata filter
+   precision을 제한한다. Phase 5 개선 후보로 남긴다.
+2. `audit_standards_qdrant` 컨테이너는 실행 중이지만 compose 소유가 아니므로 Backup/DR
+   작업 전에 운영 정리가 필요하다.
+3. C-P2-1은 Phase 4 window에서 source DOCX revision이 없어 realized drift가 0%다.
+   새 원본 개정이 발생하면 같은 공식을 재적용해야 한다.
+
+근거 산출물:
+
+- `docs/checkpoint_4_review.md`
+- `docs/PHASE_4_REPORT.md`
+- `tests/fixtures/isqm_mini_golden_dataset.jsonl`
+- `scripts/phase4f_eval.py`
+- `output/phase4_mini_golden_results.json` (gitignored)
+- `output/phase4_search_smoke_results.json` (gitignored)
+
+---
+
+## 0. Executive Summary (Phase 4f final)
+
+| 항목 | 최종 판정 | 비고 |
 |---|---|---|
-| Phase 5 진입 Go/No-Go | **PENDING** | 4b~4f 완료 + Mini Golden 실측 필요 |
+| Phase 5 진입 Go/No-Go | **GO** | 4b~4f 완료 + Mini Golden 통과 |
 | Plan v2 구조적 수용 | ✅ 대부분 수용 | v1 대비 HNSW/Backup Phase 5 이월 등 4조건 반영됨 — 재반박 금지 |
-| 남은 공격면 | 10건 식별 | §2~§11 |
-| 블로커 수 (추정) | 0건 (HIGH) / 2~3건 (MED) | Mini Golden 결과 의존 |
+| 남은 공격면 | 3건 | §0a final addendum |
+| 블로커 수 | 0건 (HIGH) / 2건 (MED) | Phase 5 개선 후보 |
 
 ---
 
@@ -819,16 +856,18 @@ CP3 §6 Self-audit 원칙 계승. 본 scaffold 단계에서의 자체 검증:
 
 ---
 
-## 13. Phase 5 진입 Go/No-Go (TBD, Phase 4f 완료 시)
+## 13. Phase 5 진입 Go/No-Go (Final, 2026-04-28)
 
-**현 시점**: **PENDING**. 판정 조건:
+**최종 판정**: **GO**. 판정 조건:
 
-1. Phase 4b~4e 완료 + pytest Phase 1-4 전수 green
-2. Mini Golden Recall@5 **점추정 ≥ 0.7 + 95% Wilson LB ≥ 0.5** (scaffold §4 제안 이중 조건)
-3. CP4 mandatory drift 섹션 (C-P2-1 재평가) 완료
-4. §2~§11 비판 중 HIGH 0 / MED ≤ 3 / LOW ≤ 5
+1. Phase 4b~4f 완료.
+2. Mini Golden Recall@5 `1.0`, MRR@10 `0.677083`.
+3. CP4 mandatory drift 섹션 완료 — realized annual invalidation `0.0%`.
+4. 4 collection Qdrant invariant PASS — total `10,387` points.
+5. HIGH blocker 0.
 
-**현 scaffold 예상**: HIGH 1 (Mini Golden 통계 brittleness) / MED 6 / LOW 3 → **CONDITIONAL GO** 가능성 높음. Mini Golden 실측 결과 따라 GO / NO-GO 반전 가능.
+**잔여 MED**: ISQM/ASSR `section=null` metadata precision, compose 소유가 아닌 Qdrant
+컨테이너 운영 정리. 둘 다 Phase 5 개선 후보이며 Phase 4 release blocker 는 아니다.
 
 ---
 
