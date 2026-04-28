@@ -42,6 +42,7 @@ from audit_parser.spec import (
 )
 
 if TYPE_CHECKING:
+    from audit_parser.ingest import Embedder, QdrantWriter
     from audit_parser.ingest.embedder import EmbedStats
     from audit_parser.ingest.qdrant_writer import UpsertResult
     from audit_parser.ingest.types import ParsedStandard
@@ -69,6 +70,13 @@ _SPEC_BY_PREFIX: Final[dict[str, StandardSpec]] = {
     "ASSR": ASSR_SPEC,
     "FRMK": FRMK_SPEC,
 }
+
+_PHASE4E_COLLECTION_BY_STANDARD_ID: Final[dict[str, str]] = {
+    "ISQM-1": "audit_standards_품질관리기준서_2018",
+    "ASSR-3000": "audit_standards_기타인증업무기준_2022",
+    "FRMK-1": "audit_standards_인증업무개념체계_2022",
+}
+_PHASE4E_STANDARD_ORDER: Final[tuple[str, ...]] = ("ISQM-1", "ASSR-3000", "FRMK-1")
 
 # Phase 4c c3 — non-ISA default standard_no (Plan v2 §6 targets).
 # ISA 는 standard boundary 가 ``감사기준서 NNN`` heading 1 로 자연 검출되므로 None.
@@ -284,6 +292,42 @@ _ENSURE_COLLECTION_OPT = typer.Option(
     True,
     "--ensure-collection/--no-ensure-collection",
     help="--upsert 시작 전 collection + payload index 생성 (idempotent).",
+)
+
+_PHASE4E_MD_DIR_OPT = typer.Option(
+    Path("output/md/"),
+    "--md-dir",
+    help="Phase 4e 대상 MD 디렉토리 (ISQM-1.md, ASSR-3000.md, FRMK-1.md).",
+)
+_PHASE4E_ONLY_COLLECTION_OPT = typer.Option(
+    None,
+    "--only-collection",
+    help="특정 Phase 4e collection 또는 standard_id 만 실행.",
+)
+_PHASE4E_FORCE_OPT = typer.Option(
+    False,
+    "--force",
+    help="대상 collection 을 삭제 후 재생성. 기본은 drop 금지.",
+)
+_PHASE4E_CONTINUE_OPT = typer.Option(
+    False,
+    "--continue-on-error",
+    help="실패 후 다음 collection 계속 진행. 기본은 fail-fast.",
+)
+_PHASE4E_VERIFY_OPT = typer.Option(
+    True,
+    "--verify/--no-verify",
+    help="적재 후 expected point count 및 collection schema 검증.",
+)
+_PHASE4E_METRICS_OUT_OPT = typer.Option(
+    None,
+    "--metrics-out",
+    help="PHASE4E_METRICS.json 저장 경로 (기본: <out>/PHASE4E_METRICS.json).",
+)
+_PHASE4E_DRY_RUN_OPT = typer.Option(
+    False,
+    "--dry-run",
+    help="Qdrant 호출 스킵, embedder 캐시 warm-up 만 수행.",
 )
 
 
@@ -511,6 +555,257 @@ def _run_upsert(
     )
     if failed:
         raise typer.Exit(code=1)
+
+
+# -- phase4e -----------------------------------------------------------------
+
+
+@app.command("phase4e")
+def phase4e(
+    md_dir: Path = _PHASE4E_MD_DIR_OPT,
+    out: Path = _INGEST_OUT_OPT,
+    only_collection: str | None = _PHASE4E_ONLY_COLLECTION_OPT,
+    force: bool = _PHASE4E_FORCE_OPT,
+    continue_on_error: bool = _PHASE4E_CONTINUE_OPT,
+    qdrant_batch_size: int = _QDRANT_BATCH_SIZE_OPT,
+    qdrant_url: str | None = _QDRANT_URL_OPT,
+    qdrant_api_key: str | None = _QDRANT_API_KEY_OPT,
+    cache_path: Path | None = _CACHE_PATH_OPT,
+    metrics_out: Path | None = _PHASE4E_METRICS_OUT_OPT,
+    dry_run: bool = _PHASE4E_DRY_RUN_OPT,
+    verify: bool = _PHASE4E_VERIFY_OPT,
+) -> None:
+    """Phase 4e — non-ISA 3개 기준서를 지정 Qdrant collection 에 적재."""
+    if not md_dir.is_dir():
+        raise typer.BadParameter(f"expected MD directory, got {md_dir}")
+
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv()
+    except ImportError:  # pragma: no cover
+        pass
+
+    out.mkdir(parents=True, exist_ok=True)
+    targets = _phase4e_targets(only_collection)
+    resolved_metrics_out = (
+        metrics_out if metrics_out is not None else out / "PHASE4E_METRICS.json"
+    )
+    _run_phase4e(
+        md_dir=md_dir,
+        out=out,
+        targets=targets,
+        force=force,
+        continue_on_error=continue_on_error,
+        qdrant_batch_size=qdrant_batch_size,
+        qdrant_url=qdrant_url,
+        qdrant_api_key=qdrant_api_key,
+        cache_path=cache_path,
+        metrics_out=resolved_metrics_out,
+        dry_run=dry_run,
+        verify=verify,
+    )
+
+
+def _phase4e_targets(only_collection: str | None) -> list[tuple[str, str]]:
+    """Return Phase 4e ``(standard_id, collection)`` targets in deterministic order."""
+    targets = [
+        (sid, _PHASE4E_COLLECTION_BY_STANDARD_ID[sid])
+        for sid in _PHASE4E_STANDARD_ORDER
+    ]
+    if only_collection is None:
+        return targets
+    selected = [
+        (sid, collection)
+        for sid, collection in targets
+        if only_collection in {sid, collection}
+    ]
+    if not selected:
+        known = sorted(_PHASE4E_STANDARD_ORDER + tuple(_PHASE4E_COLLECTION_BY_STANDARD_ID.values()))
+        raise typer.BadParameter(
+            f"unknown Phase 4e target {only_collection!r}; known: {known}"
+        )
+    return selected
+
+
+def _run_phase4e(
+    *,
+    md_dir: Path,
+    out: Path,
+    targets: list[tuple[str, str]],
+    force: bool,
+    continue_on_error: bool,
+    qdrant_batch_size: int,
+    qdrant_url: str | None,
+    qdrant_api_key: str | None,
+    cache_path: Path | None,
+    metrics_out: Path,
+    dry_run: bool,
+    verify: bool,
+) -> None:
+    """Phase 4e 본체 — collection 단위 fail-fast + post-count invariant."""
+    from audit_parser.ingest import Embedder, QdrantWriter, QdrantWriterConfig
+
+    embedder = Embedder(cache_path=cache_path)
+    writer = QdrantWriter(
+        QdrantWriterConfig(
+            url=qdrant_url or os.environ.get("QDRANT_URL", "http://localhost:6333"),
+            api_key=qdrant_api_key or os.environ.get("QDRANT_API_KEY") or None,
+        )
+    )
+
+    collections_ingested: list[dict[str, object]] = []
+    failed: list[str] = []
+    total_started = time.perf_counter()
+    try:
+        for standard_id, collection in targets:
+            try:
+                item = _run_phase4e_target(
+                    md_dir=md_dir,
+                    out=out,
+                    standard_id=standard_id,
+                    collection=collection,
+                    force=force,
+                    qdrant_batch_size=qdrant_batch_size,
+                    dry_run=dry_run,
+                    verify=verify,
+                    embedder=embedder,
+                    writer=writer,
+                )
+                collections_ingested.append(item)
+                status = "dry-run" if dry_run else f"verified={verify}"
+                typer.echo(
+                    f"[{standard_id}] {collection}: "
+                    f"expected={item['expected_points']} "
+                    f"upserted={item['points_upserted']} {status}"
+                )
+            except Exception as exc:  # noqa: BLE001 — CLI boundary: record and decide.
+                failed.append(standard_id)
+                typer.echo(
+                    f"[{standard_id}] FAILED: {type(exc).__name__}: {exc}",
+                    err=True,
+                )
+                if not continue_on_error:
+                    break
+    finally:
+        embedder.close()
+
+    total_elapsed = time.perf_counter() - total_started
+    _write_phase4e_metrics(
+        metrics_out,
+        collections_ingested=collections_ingested,
+        failed=failed,
+        dry_run=dry_run,
+        total_elapsed=total_elapsed,
+    )
+    typer.echo(
+        f"Phase 4e done: {len(collections_ingested)} collections, "
+        f"{len(failed)} failed, {total_elapsed:.1f}s"
+    )
+    if failed:
+        raise typer.Exit(code=1)
+
+
+def _run_phase4e_target(
+    *,
+    md_dir: Path,
+    out: Path,
+    standard_id: str,
+    collection: str,
+    force: bool,
+    qdrant_batch_size: int,
+    dry_run: bool,
+    verify: bool,
+    embedder: Embedder,
+    writer: QdrantWriter,
+) -> dict[str, object]:
+    """Run one Phase 4e standard through JSON write, upsert, and verification."""
+    from audit_parser.ingest import parse_md
+
+    md_path = md_dir / f"{standard_id}.md"
+    started = time.perf_counter()
+    if not md_path.is_file():
+        raise FileNotFoundError(f"missing Phase 4e MD: {md_path}")
+    parsed = parse_md(md_path)
+    if parsed is None:
+        raise ValueError(f"{md_path.name} parsed as prelude/skip")
+    if parsed.standard.standard_id != standard_id:
+        raise ValueError(
+            f"{md_path.name}: expected {standard_id}, got {parsed.standard.standard_id}"
+        )
+
+    written = _write_json(parsed, out)
+    expected_points = len(parsed.chunks) + 1
+
+    if not dry_run:
+        if force:
+            writer.delete_collection(collection)
+        writer.ensure_collection(collection)
+        writer.verify_collection_baseline(collection)
+
+    result = writer.upsert_parsed(
+        parsed,
+        embedder,
+        collection=collection,
+        batch_size=qdrant_batch_size,
+        dry_run=dry_run,
+        prune_stale=True,
+    )
+
+    actual_points: int | None = None
+    if not dry_run and verify:
+        baseline = writer.verify_collection_baseline(
+            collection, expected_points=expected_points
+        )
+        actual_points = _object_to_int(baseline["points_count"])
+
+    elapsed = time.perf_counter() - started
+    return {
+        "standard_id": standard_id,
+        "collection": collection,
+        "json_path": str(written),
+        "expected_points": expected_points,
+        "actual_points": actual_points,
+        "points_upserted": result.points_upserted,
+        "payload_drift_count": result.payload_drift_count,
+        "stale_suffix_deleted": result.stale_suffix_deleted,
+        "summary_upserted": result.summary_upserted,
+        "elapsed_seconds": round(elapsed, 3),
+    }
+
+
+def _object_to_int(value: object) -> int:
+    """Narrow JSON/Qdrant metric values before arithmetic."""
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        return int(value)
+    raise TypeError(f"expected int-compatible metric value, got {type(value).__name__}")
+
+
+def _write_phase4e_metrics(
+    metrics_out: Path,
+    *,
+    collections_ingested: list[dict[str, object]],
+    failed: list[str],
+    dry_run: bool,
+    total_elapsed: float,
+) -> None:
+    """Phase 4e collection-level metrics."""
+    metrics_out.parent.mkdir(parents=True, exist_ok=True)
+    doc: dict[str, object] = {
+        "dry_run": dry_run,
+        "collections_ingested": collections_ingested,
+        "collections_failed": failed,
+        "points_upserted_total": sum(
+            _object_to_int(item["points_upserted"]) for item in collections_ingested
+        ),
+        "elapsed_seconds_total": round(total_elapsed, 3),
+    }
+    metrics_out.write_text(
+        json.dumps(doc, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _write_embed_metrics(

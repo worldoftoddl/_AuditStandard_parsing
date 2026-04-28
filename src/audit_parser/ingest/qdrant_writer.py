@@ -89,7 +89,7 @@ _QDRANT_POINT_NAMESPACE: Final = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8
 
 KIND_STANDARD_SUMMARY: Final = "standard_summary"
 
-# §13 / checkpoint_3_prep.md §6.2 — 11 개 indexed 필드
+# §13 / checkpoint_3_prep.md §6.2 + Phase 4e — 12 개 indexed 필드
 _KEYWORD_INDEXES: Final[tuple[str, ...]] = (
     "standard_id",
     "standard_no",
@@ -100,6 +100,7 @@ _KEYWORD_INDEXES: Final[tuple[str, ...]] = (
     "heading_trail_hash",
     "parent_paragraph_id",
     "part_of",
+    "special_appendix_name",
 )
 _INTEGER_INDEXES: Final[tuple[str, ...]] = ("appendix_index",)
 _BOOL_INDEXES: Final[tuple[str, ...]] = ("is_application_guidance",)
@@ -267,9 +268,7 @@ def _truncate_for_summary_embedding(text: str) -> str:
 
 
 def _chunk_payload(std: StandardRecord, chunk: ChunkRecord) -> dict[str, object]:
-    """§13 24 필드 + ``content_text_hash``. return 은 ``dict[str, object]`` —
-    Qdrant 공식 ``Dict[str, Any]`` 와 호환 (object → Any 암묵 narrowing)."""
-    """§13 24 필드 + ``content_text_hash`` (C-P2-1 준비)."""
+    """§13 payload 필드 + ``content_text_hash`` (C-P2-1 준비)."""
     return {
         # 기준서 메타
         "standard_id": std.standard_id,
@@ -291,6 +290,7 @@ def _chunk_payload(std: StandardRecord, chunk: ChunkRecord) -> dict[str, object]
         "chunk_index": chunk.chunk_index,
         "chunk_of": chunk.chunk_of,
         "source_idx": chunk.source_idx,
+        "special_appendix_name": chunk.special_appendix_name,
         "part_of": chunk.part_of,
         # 원본
         "content_text": chunk.content_text,
@@ -332,6 +332,7 @@ def _summary_payload(
         "chunk_index": 0,
         "chunk_of": 1,
         "source_idx": -1,
+        "special_appendix_name": None,
         "part_of": None,
         "content_text": composed,
         "content_markdown": composed,
@@ -382,7 +383,7 @@ class QdrantWriter:
     # -- collection management ----------------------------------------------
 
     def ensure_collection(self, name: str = COLLECTION_DEFAULT) -> None:
-        """Collection 생성 + payload index 11 종. 존재 시 idempotent."""
+        """Collection 생성 + payload index 12 종. 존재 시 idempotent."""
         vectors = {
             VECTOR_PASSAGE: VectorParams(
                 size=EMBED_DIM,
@@ -463,6 +464,15 @@ class QdrantWriter:
 
         for slot in (VECTOR_PASSAGE, VECTOR_SUMMARY):
             _assert_isa_baseline_vector(name, slot, vectors_config[slot])
+
+        schema = info.payload_schema
+        expected_indexes = set(_KEYWORD_INDEXES) | set(_INTEGER_INDEXES) | set(_BOOL_INDEXES)
+        missing_indexes = sorted(expected_indexes - set(schema.keys()))
+        if missing_indexes:
+            raise SchemaDriftError(
+                f"{name}: missing payload indexes {missing_indexes}; "
+                "run ensure_collection or recreate the collection"
+            )
 
         actual_points = self.count(name)
         if expected_points is not None and actual_points != expected_points:

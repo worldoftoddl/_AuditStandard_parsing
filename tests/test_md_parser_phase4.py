@@ -209,6 +209,29 @@ def test_real_phase4d_non_isa_md_parse_and_validate_if_present(
     assert not any(THREE_LEVEL_NUMERIC_SUFFIX_RE.search(chunk_id) for chunk_id in chunk_ids)
 
 
+def test_real_frmk_restores_table_heading_sections_and_special_appendix() -> None:
+    """FRMK heading list is separate from body tables; parser must restore row scope."""
+    md_path = MD_DIR / "FRMK-1.md"
+    if not md_path.exists():
+        pytest.skip(f"{md_path} missing — run Phase 4c convert first")
+
+    parsed = parse_md(md_path)
+    assert parsed is not None
+
+    assert any(chunk.section == "intro" for chunk in parsed.chunks)
+    assert any(chunk.section == "evidence" for chunk in parsed.chunks)
+    assert any(chunk.section == "appendix" for chunk in parsed.chunks)
+    assert not all(chunk.section == "appendix" for chunk in parsed.chunks)
+
+    special_chunks = [
+        chunk
+        for chunk in parsed.chunks
+        if chunk.special_appendix_name == "역할과 책임"
+    ]
+    assert special_chunks
+    assert all(chunk.appendix_index is None for chunk in special_chunks)
+
+
 def test_real_isqm_iter_body_global_idx_unique_if_raw_present() -> None:
     """ISQM body_parser output must be globally reindexed before MD rendering."""
     from audit_parser.ir import iter_body

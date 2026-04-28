@@ -259,6 +259,7 @@ Phase 1 `Section` 와 일치 (types.py):
 
 - `"intro"`, `"overall_objective"`, `"purpose"`, `"definitions"`, `"requirements"`, `"application"`, `"appendix"`, `"unknown"`
 - **ISA-1200 전용:** `"general_principles"`, `"ethical_requirements"`, `"engagement_acceptance"`, `"planning"`, `"materiality"`, `"risk_assessment"`, `"risk_response"`, `"conclusion_reporting"`, `"other_considerations"`
+- **FRMK-1 전용:** `"ethical_requirements_and_quality"`, `"assurance_definition"`, `"attestation_vs_direct"`, `"reasonable_vs_limited_assurance"`, `"framework_scope"`, `"non_assurance_reports"`, `"assurance_preconditions"`, `"assurance_components"`, `"three_party_relationship"`, `"underlying_subject_matter"`, `"criteria"`, `"evidence"`, `"assurance_report"`, `"other_matters"`, `"inappropriate_use_of_name"`
 
 null 허용 (prelude/TOC 구간, Phase 2 chunk 생성 시점에 배제).
 
@@ -1037,7 +1038,14 @@ def make_guidance_link(
               "requirements", "application", "appendix",
               "general_principles", "ethical_requirements", "engagement_acceptance",
               "planning", "materiality", "risk_assessment", "risk_response",
-              "conclusion_reporting", "other_considerations", "unknown", null
+              "conclusion_reporting", "other_considerations",
+              "ethical_requirements_and_quality", "assurance_definition",
+              "attestation_vs_direct", "reasonable_vs_limited_assurance",
+              "framework_scope", "non_assurance_reports", "assurance_preconditions",
+              "assurance_components", "three_party_relationship",
+              "underlying_subject_matter", "criteria", "evidence",
+              "assurance_report", "other_matters", "inappropriate_use_of_name",
+              "unknown", null
             ]
           },
           "appendix_index": {"type": ["integer", "null"], "minimum": 1},

@@ -82,7 +82,7 @@ MD_SCHEMA_SUPPORTED: Final = frozenset({"1.0"})
 
 # MD table 구분자 행 regex — `| --- | --- |` 형태. cell-level `\|` escape 는 §10.2
 # 규약대로 복원 대상.
-_TABLE_SEPARATOR_RE: Final = re.compile(r"^\s*\|\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|\s*$")
+_TABLE_SEPARATOR_RE: Final = re.compile(r"^\s*(\|\s*:?-+:?\s*)+\|\s*$")
 _TABLE_ROW_RE: Final = re.compile(r"^\s*\|.*\|\s*$")
 
 # chunk 대상 kind — json_schema.md §5.4. heading / toc_entry 제외.
@@ -278,7 +278,7 @@ def parse_md(
     # 여전히 prefix 불일치 가능 — 2중 guard.
     spec.validate_standard_id(standard.standard_id)
     raw_chunks, scope_parts, definitions_parts = _parse_body(
-        lines[body_start:], standard.standard_no
+        lines[body_start:], standard.standard_no, spec=spec
     )
     chunks = tuple(
         _assemble_chunks(raw_chunks, standard.authority_base, standard.standard_id, spec=spec)
@@ -471,6 +471,8 @@ _SummaryPart = tuple[tuple[str, ...], list[str]]
 def _parse_body(
     lines: Sequence[str],
     standard_no: str,
+    *,
+    spec: StandardSpec = ISA_SPEC,
 ) -> tuple[list[_RawChunk], list[_SummaryPart], list[_SummaryPart]]:
     """body → raw chunks + summary 추출 보조.
 
@@ -479,6 +481,11 @@ def _parse_body(
         (heading_trail snapshot, content_markdown lines) 튜플 리스트로 저장하여
         Summary 조립 시 markdown/text 양쪽 복원 가능.
     """
+    if spec.prefix == "FRMK" and any(
+        _TABLE_ROW_RE.match(line.rstrip("\r")) for line in lines
+    ):
+        return _parse_body_frmk(lines, standard_no)
+
     raw_chunks: list[_RawChunk] = []
     scope_parts: list[_SummaryPart] = []
     definitions_parts: list[_SummaryPart] = []
@@ -523,6 +530,259 @@ def _parse_body(
         pending_content.append(stripped)
 
     return raw_chunks, scope_parts, definitions_parts
+
+
+_FRMK_SECTION_BY_HEADING: Final[dict[str, str]] = {
+    "서론": "intro",
+    "윤리 원칙과 품질관리기준": "ethical_requirements_and_quality",
+    "인증업무의 의의": "assurance_definition",
+    "입증업무와 직접업무": "attestation_vs_direct",
+    "합리적 확신업무와 제한적 확신업무": "reasonable_vs_limited_assurance",
+    "개념체계의 범위": "framework_scope",
+    "비인증업무보고서": "non_assurance_reports",
+    "인증업무의 전제조건": "assurance_preconditions",
+    "인증업무의 구성 요소": "assurance_components",
+    "삼자관계": "three_party_relationship",
+    "기초인증대상": "underlying_subject_matter",
+    "준거기준": "criteria",
+    "증거": "evidence",
+    "인증보고서": "assurance_report",
+    "기타 사항": "other_matters",
+    "인증인 명칭의 부적절한 사용": "inappropriate_use_of_name",
+}
+
+
+def _parse_body_frmk(  # noqa: C901 - FRMK table/heading reconstruction state machine.
+    lines: Sequence[str],
+    standard_no: str,
+) -> tuple[list[_RawChunk], list[_SummaryPart], list[_SummaryPart]]:
+    """FRMK MD 복원.
+
+    FRMK DOCX 는 heading 2 목록이 본문 table 앞에 먼저 나오고, 실제 본문은
+    markdown table row 로 이어진다. 일반 순차 parser 를 적용하면 마지막 보론
+    heading 이 모든 table/cell chunk 에 누수되므로 table row 를 기준으로
+    section/heading 을 재구성한다.
+    """
+    raw_chunks: list[_RawChunk] = []
+    heading_aliases = _collect_frmk_heading_aliases(lines)
+    standard_id = f"FRMK-{standard_no}"
+    current_section: str | None = None
+    current_trail: tuple[str, ...] = (standard_id,)
+    table_lines: list[str] = []
+    skip_flattened_cells = False
+    pending_content: list[str] = []
+    pending_kind: str | None = None
+    pending_source_idx: int | None = None
+
+    def flush_pending() -> None:
+        nonlocal pending_content, pending_kind, pending_source_idx
+        content = _tidy_pending_content(pending_content)
+        if pending_kind is not None and pending_source_idx is not None and content:
+            raw_chunks.append(
+                _RawChunk(
+                    paragraph_id=None,
+                    kind=pending_kind,
+                    section=None,
+                    heading_trail=(standard_id,),
+                    parent_paragraph_id=None,
+                    is_application_guidance=False,
+                    source_idx=pending_source_idx,
+                    content_lines=content,
+                )
+            )
+        pending_content = []
+        pending_kind = None
+        pending_source_idx = None
+
+    for line in lines:
+        stripped = line.rstrip("\r")
+        if _TABLE_ROW_RE.match(stripped):
+            if not table_lines:
+                flush_pending()
+            table_lines.append(stripped)
+            continue
+
+        comment_match = _COMMENT_RE.match(stripped)
+        if table_lines and comment_match is not None:
+            fields = parse_comment_fields(comment_match.group(1))
+            if fields.get("kind") == "table":
+                source_idx = int(fields["idx"])
+                current_section, current_trail = _append_frmk_table_rows(
+                    table_lines=table_lines,
+                    raw_chunks=raw_chunks,
+                    standard_id=standard_id,
+                    source_idx=source_idx,
+                    current_section=current_section,
+                    current_trail=current_trail,
+                    heading_aliases=heading_aliases,
+                )
+                table_lines = []
+                skip_flattened_cells = True
+                continue
+
+        if table_lines:
+            table_lines = []
+
+        heading_match = _HEADING_RE.match(stripped)
+        if heading_match is not None and comment_match is None:
+            heading_text = heading_match.group(2).rstrip()
+            current_section, current_trail = _frmk_heading_state(
+                heading_text,
+                standard_id=standard_id,
+                heading_aliases=heading_aliases,
+                previous_section=current_section,
+                previous_trail=current_trail,
+            )
+            if current_section == "appendix" and "보론:" in current_trail[-1]:
+                raw_chunks.append(
+                    _RawChunk(
+                        paragraph_id=None,
+                        kind="paragraph_body",
+                        section=current_section,
+                        heading_trail=current_trail,
+                        parent_paragraph_id=None,
+                        is_application_guidance=False,
+                        source_idx=0,
+                        content_lines=[current_trail[-1]],
+                    )
+                )
+            pending_content = []
+            continue
+
+        if comment_match is not None:
+            fields = parse_comment_fields(comment_match.group(1))
+            kind = fields.get("kind")
+            if kind in _CHUNK_KINDS and not skip_flattened_cells:
+                pending_kind = kind
+                pending_source_idx = int(fields["idx"])
+                flush_pending()
+            continue
+
+        if stripped == "":
+            pending_content.append("")
+            continue
+        if skip_flattened_cells:
+            continue
+        pending_content.append(stripped)
+
+    flush_pending()
+    return raw_chunks, [], []
+
+
+def _collect_frmk_heading_aliases(lines: Sequence[str]) -> dict[str, str]:
+    """FRMK top heading list 에서 short appendix heading → full heading alias."""
+    aliases: dict[str, str] = {}
+    for line in lines:
+        heading_match = _HEADING_RE.match(line.rstrip("\r"))
+        if heading_match is None:
+            continue
+        heading = heading_match.group(2).rstrip()
+        if heading.startswith("보론:"):
+            aliases["보론"] = heading
+        numbered = re.match(r"^(보론\s*\d+)\b", heading)
+        if numbered is not None:
+            aliases[numbered.group(1).replace(" ", "")] = heading
+            aliases[numbered.group(1)] = heading
+    return aliases
+
+
+def _append_frmk_table_rows(
+    *,
+    table_lines: Sequence[str],
+    raw_chunks: list[_RawChunk],
+    standard_id: str,
+    source_idx: int,
+    current_section: str | None,
+    current_trail: tuple[str, ...],
+    heading_aliases: Mapping[str, str],
+) -> tuple[str | None, tuple[str, ...]]:
+    rows = [_split_table_row(line) for line in table_lines if not _TABLE_SEPARATOR_RE.match(line)]
+    row_ordinal = 0
+    for row in rows:
+        cells = tuple(cell.strip() for cell in row)
+        if not any(cells):
+            continue
+        if _frmk_row_is_heading(cells):
+            heading = next(cell for cell in cells if cell)
+            current_section, current_trail = _frmk_heading_state(
+                heading,
+                standard_id=standard_id,
+                heading_aliases=heading_aliases,
+                previous_section=current_section,
+                previous_trail=current_trail,
+            )
+            continue
+        row_ordinal += 1
+        if len(cells) > 2:
+            content_lines = [_frmk_render_table_row(cells)]
+            kind = "table"
+            paragraph_id = None
+        else:
+            paragraph_id = cells[0] or None
+            content = cells[1] if len(cells) > 1 else cells[0]
+            content_lines = [content]
+            kind = "paragraph_body"
+        raw_chunks.append(
+            _RawChunk(
+                paragraph_id=paragraph_id,
+                kind=kind,
+                section=current_section,
+                heading_trail=current_trail,
+                parent_paragraph_id=None,
+                is_application_guidance=False,
+                source_idx=source_idx * 1000 + row_ordinal,
+                content_lines=content_lines,
+            )
+        )
+    return current_section, current_trail
+
+
+def _frmk_row_is_heading(cells: tuple[str, ...]) -> bool:
+    non_empty = [cell for cell in cells if cell]
+    if not non_empty:
+        return False
+    if len(non_empty) == 1 and cells[0] == "":
+        return True
+    text = non_empty[0]
+    return (
+        len(non_empty) == 1
+        and (text in _FRMK_SECTION_BY_HEADING or text.startswith("보론"))
+    )
+
+
+def _frmk_heading_state(
+    heading: str,
+    *,
+    standard_id: str,
+    heading_aliases: Mapping[str, str],
+    previous_section: str | None,
+    previous_trail: tuple[str, ...],
+) -> tuple[str | None, tuple[str, ...]]:
+    canonical = _frmk_canonical_heading(heading, heading_aliases)
+    if canonical.startswith("보론"):
+        return "appendix", (standard_id, canonical)
+    mapped = _FRMK_SECTION_BY_HEADING.get(canonical)
+    if mapped is not None:
+        return mapped, (standard_id, canonical)
+    if previous_section is None:
+        return previous_section, previous_trail
+    parent = previous_trail[:2] if len(previous_trail) >= 2 else previous_trail
+    return previous_section, (*parent, canonical)
+
+
+def _frmk_canonical_heading(heading: str, aliases: Mapping[str, str]) -> str:
+    stripped = heading.strip()
+    key = stripped.replace(" ", "")
+    if stripped == "보론":
+        return aliases.get("보론", "보론: 역할과 책임")
+    if key in aliases:
+        return aliases[key]
+    return aliases.get(stripped, stripped)
+
+
+def _frmk_render_table_row(cells: Sequence[str]) -> str:
+    escaped = [cell.replace("|", r"\|").replace("\n", "<br>") for cell in cells]
+    return "| " + " | ".join(escaped) + " |"
 
 
 def _handle_comment_line(

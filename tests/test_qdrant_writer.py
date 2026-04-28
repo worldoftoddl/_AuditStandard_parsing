@@ -9,7 +9,7 @@ Solar 비용 0.
 
 1. ``ensure_collection`` — vectors_config 2 종 4096 cosine 확인
 2. 재호출 idempotent
-3. payload index 11 종 생성 확인 (payload_schema)
+3. payload index 12 종 생성 확인 (payload_schema)
 4. ``chunk_id_to_point_id`` 결정성 (동일 입력 → 동일 UUID, 이종 → 다른 UUID)
 5. minimal ParsedStandard (2 chunks) upsert → count == 3 (chunks + summary)
 6. Re-upsert 동일 입력 → points_upserted 동일, payload_drift=0
@@ -267,13 +267,14 @@ def test_payload_indexes_created(
         "heading_trail_hash",
         "parent_paragraph_id",
         "part_of",
+        "special_appendix_name",
     }
     missing = expected_keywords - set(schema.keys())
     assert not missing, f"missing keyword indexes: {missing}"
     assert "appendix_index" in schema
     assert "is_application_guidance" in schema
-    # 총 11 index
-    assert len(expected_keywords | {"appendix_index", "is_application_guidance"}) == 11
+    # 총 12 index
+    assert len(expected_keywords | {"appendix_index", "is_application_guidance"}) == 12
 
 
 # ---------------------------------------------------------------------------
