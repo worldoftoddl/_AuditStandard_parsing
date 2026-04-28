@@ -21,6 +21,7 @@ dist/
 # Pipeline outputs (gitignored)
 output/
 .embed_cache.sqlite
+.embed_cache.sqlite-*
 qdrant_storage/
 
 # Domain reviewer scratch
