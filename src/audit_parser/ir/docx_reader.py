@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import zipfile
 from collections.abc import Iterable, Iterator
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
@@ -150,12 +151,13 @@ def iter_body(
     # non-ISA: recurse=True descends into wrapper tables (FRMK tbl[3x3] / ASSR
     # tbl[427x2]) — inner <w:p> yielded at top-level.
     from audit_parser.spec import ISA_SPEC as _ISA_SPEC  # local — avoid cycle
-    recurse = spec is not _ISA_SPEC
     body_parser = spec.body_parser
+    recurse = spec is not _ISA_SPEC and body_parser is None
     for child in _iter_block_level(body, recurse=recurse):
         # body_parser dispatch — atomic RawBlock emission, no chunk_of tampering.
         if body_parser is not None and child.tag == _TAG_TBL:
-            yield from body_parser(child)
+            for parsed_raw in body_parser(child):
+                yield replace(parsed_raw, idx=counter.next())
             continue
         raw = _block_to_raw(child, counter, style_index)
         if raw is not None:

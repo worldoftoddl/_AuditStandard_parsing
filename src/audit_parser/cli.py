@@ -345,8 +345,8 @@ def ingest(
         parsed_list = parse_md_dir(path)
         for parsed in parsed_list:
             _write_json(parsed, out)
-        # parse_md_dir 는 ISA-*.md glob → 나머지(00_전문.md 등) 를 skip 으로 log.
-        emitted = {f"ISA-{p.standard.standard_no}.md" for p in parsed_list}
+        # parse_md_dir 는 supported standard MD 만 처리 → 나머지(00_전문.md 등) log.
+        emitted = {f"{p.standard.standard_id}.md" for p in parsed_list}
         all_md = {p.name for p in path.glob("*.md")}
         for name in sorted(all_md - emitted):
             typer.echo(f"skipped: {name}")
@@ -414,10 +414,10 @@ def _validate_phase3_flags(
 
 
 def _write_json(parsed: ParsedStandard, out: Path) -> Path:
-    """``ParsedStandard`` → ``out/ISA-{standard_no}.json`` 직렬화."""
+    """``ParsedStandard`` → ``out/{standard_id}.json`` 직렬화."""
     from audit_parser.ingest import to_json_dict
 
-    target = out / f"ISA-{parsed.standard.standard_no}.json"
+    target = out / f"{parsed.standard.standard_id}.json"
     data = to_json_dict(parsed)
     target.write_text(
         json.dumps(data, ensure_ascii=False, indent=2) + "\n",

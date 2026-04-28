@@ -46,6 +46,7 @@ from audit_parser.ingest.md_parser import (
     to_json_dict,
 )
 from audit_parser.ingest.types import JSON_SCHEMA_VERSION, ChunkRecord
+from audit_parser.spec import ISA_SPEC
 
 # ---------------------------------------------------------------------------
 # Fixture 경로
@@ -627,7 +628,7 @@ def test_json_schema_validation_all_isa(
     json_schema_validator: Draft202012Validator,
 ) -> None:
     _require_md_dir()
-    parsed = parse_md_dir(MD_DIR)
+    parsed = parse_md_dir(MD_DIR, spec=ISA_SPEC)
     assert len(parsed) == 36
     for p in parsed:
         data = to_json_dict(p)
@@ -642,7 +643,7 @@ def test_json_schema_validation_all_isa(
 
 def test_parse_md_dir_skips_prelude() -> None:
     _require_md_dir()
-    parsed = parse_md_dir(MD_DIR)
+    parsed = parse_md_dir(MD_DIR, spec=ISA_SPEC)
     ids = [p.standard.standard_id for p in parsed]
     assert "ISA-200" in ids
     assert "ISA-1200" in ids

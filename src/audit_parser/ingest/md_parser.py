@@ -303,17 +303,44 @@ def parse_md(
     )
 
 
-def parse_md_dir(md_dir: Path, *, spec: StandardSpec = ISA_SPEC) -> list[ParsedStandard]:
-    """디렉토리 전체 파싱. 00_전문.md skip, ISA-*.md 만 ISA 숫자 오름차순.
+_MD_FILE_PREFIX_ORDER: Final[dict[str, int]] = {
+    "ISA": 0,
+    "ISQM": 1,
+    "ASSR": 2,
+    "FRMK": 3,
+}
+_SUPPORTED_STANDARD_MD_RE: Final = re.compile(
+    r"^(?P<prefix>ISA|ISQM|ASSR|FRMK)-(?P<standard_no>\d{1,4})\.md$"
+)
 
-    v1.2: ``spec`` 주입. default = ISA_SPEC (backward-compat). Phase 4b-2 의
-    ISQM/ASSR/FRMK 전용 디렉토리는 해당 spec 주입 필요.
+
+def _md_file_sort_key(path: Path) -> tuple[int, int, str]:
+    """Supported standard MD filename → deterministic prefix/no/name order."""
+    match = _SUPPORTED_STANDARD_MD_RE.fullmatch(path.name)
+    if match is None:  # pragma: no cover — caller filters first.
+        return (len(_MD_FILE_PREFIX_ORDER), sys.maxsize, path.name)
+    prefix = match.group("prefix")
+    standard_no = int(match.group("standard_no"))
+    return (_MD_FILE_PREFIX_ORDER[prefix], standard_no, path.name)
+
+
+def parse_md_dir(md_dir: Path, *, spec: StandardSpec | None = None) -> list[ParsedStandard]:
+    """디렉토리 전체 파싱. prelude skip, supported standard MD deterministically sorted.
+
+    v1.2: ``spec`` 주입. default ``None`` 은 ``parse_md`` 의 frontmatter 기반
+    auto-dispatch 를 사용해 ISA/ISQM/ASSR/FRMK 를 함께 처리한다. Explicit ``spec``
+    caller 는 backward-compat 를 위해 해당 prefix 파일만 파싱한다.
     """
     results: list[ParsedStandard] = []
-    md_files = sorted(
-        md_dir.glob("ISA-*.md"),
-        key=lambda p: int(p.stem.split("-")[1]),
-    )
+    md_files = []
+    for md_path in md_dir.glob("*.md"):
+        match = _SUPPORTED_STANDARD_MD_RE.fullmatch(md_path.name)
+        if match is None:
+            continue
+        if spec is not None and match.group("prefix") != spec.prefix:
+            continue
+        md_files.append(md_path)
+    md_files = sorted(md_files, key=_md_file_sort_key)
     for md_path in md_files:
         parsed = parse_md(md_path, spec=spec)
         if parsed is not None:
@@ -681,6 +708,7 @@ def _resolve_chunk_id_collisions(chunks: tuple[ChunkRecord, ...]) -> tuple[Chunk
                 chunk_index=c.chunk_index,
                 chunk_of=c.chunk_of,
                 source_idx=c.source_idx,
+                special_appendix_name=c.special_appendix_name,
                 part_of=c.part_of,
                 table_cells=c.table_cells,
                 embedding=c.embedding,
